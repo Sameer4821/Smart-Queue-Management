@@ -28,7 +28,8 @@ import {
   Upload,
   QrCode,
   Save,
-  Plus
+  Plus,
+  Monitor,
 } from "lucide-react-native";
 import { Card } from "../components/ui/card";
 import { toast } from "sonner-native";
@@ -52,13 +53,13 @@ const QUICK_DOSAGE = ["1-0-1", "1-1-1", "0-0-1", "SOS"];
 export function StaffDashboard() {
   const { state: appState, setState: setAppState, addPrescriptionToToken } = useAppContext();
   const t = translations[appState.language] || translations.en;
-  
+
   // Camera permissions
   const [permission, requestPermission] = useCameraPermissions();
-  
+
   // Sort queue strictly by priority
   const priorityMap = { emergency: 1, disabled: 2, common: 3 };
-  
+
   // All active tokens
   const allActiveTokens = (appState.tokens || []).filter(t => t.status === "active" || t.status === "waiting").sort((a, b) => {
     const isAEmergency = a.type?.toLowerCase() === 'emergency' || a.primaryDepartment?.toLowerCase() === 'emergency';
@@ -72,15 +73,21 @@ export function StaffDashboard() {
     const pA = priorityMap[a.type] || 3;
     const pB = priorityMap[b.type] || 3;
     if (pA !== pB) return pA - pB;
-    
+
     return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
   });
 
   const [activePatient, setActivePatient] = useState(allActiveTokens.length > 0 ? allActiveTokens[0] : null);
-  
+
   // Upcoming queue is all other patients (Fully viewable instead of just 3)
   const upcomingQueue = allActiveTokens.filter(t => t.id !== activePatient?.id);
   const totalWaiting = allActiveTokens.length;
+
+  // Top-level tab: 'queue' (existing) | 'live' (new Live Queue Display)
+  const [activeTab, setActiveTab] = useState('queue');
+
+  // Last-updated timestamp for Live Queue Display
+  const [lastUpdated, setLastUpdated] = useState(new Date());
 
   // Track prescription mode
   const [prescriptionMode, setPrescriptionMode] = useState(null); // 'template', 'upload', 'scan'
@@ -103,6 +110,12 @@ export function StaffDashboard() {
     }
   }, [allActiveTokens]);
 
+  // Tick the "last updated" clock for Live Queue Display
+  useEffect(() => {
+    const tick = setInterval(() => setLastUpdated(new Date()), 30000);
+    return () => clearInterval(tick);
+  }, []);
+
   // Supabase Real-Time Sync for Token Queue
   useEffect(() => {
     const channel = supabase.channel('public:queue_sync')
@@ -110,33 +123,33 @@ export function StaffDashboard() {
         if (payload.eventType === 'INSERT') {
           const newRow = payload.new;
           const mappedToken = {
-             id: newRow.token_id,
-             type: newRow.token_id && newRow.token_id.startsWith('EME') ? 'emergency' : newRow.token_id && newRow.token_id.startsWith('ACE') ? 'disabled' : 'common',
-             primaryDepartment: newRow.department,
-             timestamp: newRow.created_at ? new Date(newRow.created_at) : new Date(),
-             patient: {
-                name: newRow.patient_name || 'Walk-in Patient',
-             },
-             status: newRow.status || 'active',
-             qrCode: newRow.token_id
+            id: newRow.token_id,
+            type: newRow.token_id && newRow.token_id.startsWith('EME') ? 'emergency' : newRow.token_id && newRow.token_id.startsWith('ACE') ? 'disabled' : 'common',
+            primaryDepartment: newRow.department,
+            timestamp: newRow.created_at ? new Date(newRow.created_at) : new Date(),
+            patient: {
+              name: newRow.patient_name || 'Walk-in Patient',
+            },
+            status: newRow.status || 'active',
+            qrCode: newRow.token_id
           };
 
           setAppState(prev => {
-             const exists = prev.tokens.find(t => t.id === mappedToken.id);
-             if (exists) return prev;
-             return { ...prev, tokens: [...prev.tokens, mappedToken] };
+            const exists = prev.tokens.find(t => t.id === mappedToken.id);
+            if (exists) return prev;
+            return { ...prev, tokens: [...prev.tokens, mappedToken] };
           });
-        } 
+        }
         else if (payload.eventType === 'UPDATE') {
           setAppState(prev => ({
-             ...prev,
-             tokens: prev.tokens.map(t => t.id === payload.new.token_id ? { ...t, status: payload.new.status } : t)
+            ...prev,
+            tokens: prev.tokens.map(t => t.id === payload.new.token_id ? { ...t, status: payload.new.status } : t)
           }));
-        } 
+        }
         else if (payload.eventType === 'DELETE') {
           setAppState(prev => ({
-             ...prev,
-             tokens: prev.tokens.filter(t => t.id !== payload.old.token_id)
+            ...prev,
+            tokens: prev.tokens.filter(t => t.id !== payload.old.token_id)
           }));
         }
       })
@@ -207,7 +220,7 @@ export function StaffDashboard() {
     } catch (err) {
       console.error("Error saving prescription to Supabase:", err);
     }
-    
+
     toast.success("Prescription Saved", {
       description: "Available in patient records.",
     });
@@ -240,7 +253,7 @@ export function StaffDashboard() {
       });
 
       setPrescriptionMode(null);
-      
+
       // Find next patient
       const remainingTokens = allActiveTokens.filter(t => t.id !== activePatient.id);
       setActivePatient(remainingTokens.length > 0 ? remainingTokens[0] : null);
@@ -320,8 +333,8 @@ export function StaffDashboard() {
         description: `${matchedToken.patient?.name || "Patient"}'s appointment has been marked complete.`,
       });
     } catch (error) {
-       toast.error("Error", { description: "Failed to mark scanned patient as completed." });
-       scanLockRef.current = false;
+      toast.error("Error", { description: "Failed to mark scanned patient as completed." });
+      scanLockRef.current = false;
     }
   };
 
@@ -338,6 +351,48 @@ export function StaffDashboard() {
     if (type === "disabled") return { bg: "#f0fdfa", text: "#0d9488", border: "#99f6e4", name: "Accessibility" };
     return { bg: "#f0f9ff", text: "#0ea5e9", border: "#bae6fd", name: "General" };
   };
+
+  // ─── Live Queue Display helpers ───────────────────────────────────────────
+
+  // Returns a colour accent for a department type
+  const getDeptAccent = (type) => {
+    if (type === "diagnostic") return "#f59e0b";
+    if (type === "pharmacy") return "#8b5cf6";
+    if (type === "administrative") return "#64748b";
+    return "#2563eb"; // consultation / default
+  };
+
+  // Build a map: deptName -> { tokens[], dept }
+  const buildLiveQueueMap = () => {
+    const map = {};
+
+    // Seed from department list
+    (appState.departments || []).forEach((dept) => {
+      map[dept.name] = { dept, tokens: [] };
+    });
+
+    // Populate with live tokens
+    allActiveTokens.forEach((tok) => {
+      const key = tok.primaryDepartment;
+      if (!key) return;
+      if (!map[key]) map[key] = { dept: null, tokens: [] };
+      map[key].tokens.push(tok);
+    });
+
+    // Keep only departments that have active tokens OR a non-zero queue
+    return Object.entries(map).filter(([, val]) => {
+      const hasLiveTokens = val.tokens.length > 0;
+      const hasStaticQueue = val.dept && val.dept.currentQueue > 0;
+      return hasLiveTokens || hasStaticQueue;
+    });
+  };
+
+  const formatTime = (date) => {
+    const h = date.getHours().toString().padStart(2, "0");
+    const m = date.getMinutes().toString().padStart(2, "0");
+    return `${h}:${m}`;
+  };
+  // ─────────────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={styles.container}>
@@ -365,342 +420,477 @@ export function StaffDashboard() {
             Patients Waiting: <Text style={{ fontWeight: "700" }}>{totalWaiting}</Text>
           </Text>
         </View>
+
+        {/* ── Tab Navigation Bar ── */}
+        <View style={styles.mainTabBar}>
+          <TouchableOpacity
+            style={[styles.mainTabBtn, activeTab === 'queue' && styles.mainTabBtnActive]}
+            onPress={() => setActiveTab('queue')}
+          >
+            <Activity size={16} color={activeTab === 'queue' ? '#2563eb' : '#64748b'} />
+            <Text style={[styles.mainTabText, activeTab === 'queue' && styles.mainTabTextActive]}>
+              Queue Management
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.mainTabBtn, activeTab === 'live' && styles.mainTabBtnActive]}
+            onPress={() => setActiveTab('live')}
+          >
+            <Monitor size={16} color={activeTab === 'live' ? '#2563eb' : '#64748b'} />
+            <Text style={[styles.mainTabText, activeTab === 'live' && styles.mainTabTextActive]}>
+              Live Queue
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* 2. ACTIVE PATIENT CARD */}
-        {activePatient ? (
-          <View style={styles.activePatientContainer}>
-            <Text style={styles.sectionTitle}>Current Patient</Text>
-            <Card style={styles.activeCard}>
-              <View style={styles.activeCardContent}>
-                <View style={styles.mainTokenArea}>
-                  <Text style={styles.tokenLabel}>TOKEN</Text>
-                  <Text style={styles.largeToken}>{formatTokenId(activePatient.id)}</Text>
-                  <View style={[styles.priorityBadge, { backgroundColor: getPriorityColors(activePatient.type).bg }]}>
-                    <Text style={[styles.priorityText, { color: getPriorityColors(activePatient.type).text }]}>
-                      {getPriorityColors(activePatient.type).name}
-                    </Text>
-                  </View>
-                </View>
-                
-                <View style={styles.patientDetails}>
-                  <Text style={styles.patientName}>{activePatient.patient?.name || "Patient Name"}</Text>
-                  <Text style={styles.patientAge}>
-                    {activePatient.patient?.age || "--"} Yrs • {activePatient.patient?.gender?.charAt(0).toUpperCase() || "U"}
-                  </Text>
-                  <View style={styles.infoRow}>
-                    <Stethoscope size={14} color="#64748b" />
-                    <Text style={styles.infoText}>{activePatient.primaryDepartment || "General Consultation"}</Text>
-                  </View>
-                  <View style={styles.infoRow}>
-                    <Activity size={14} color="#64748b" />
-                    <Text style={styles.infoText} numberOfLines={1}>
-                      Symptoms: Standard check-up
-                    </Text>
-                  </View>
-                  <View style={styles.verifyContainer}>
-                    <Text style={styles.verifyText}>ID: {activePatient.id.substring(0,8).toUpperCase()}</Text>
-                  </View>
-                </View>
+      {/* ══════════════════════════════════════════════════════════════════════
+          LIVE QUEUE DISPLAY TAB
+      ══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'live' && (() => {
+        const liveRows = buildLiveQueueMap();
+        return (
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            {/* Header row */}
+            <View style={styles.liveHeaderRow}>
+              <View>
+                <Text style={styles.liveTitle}>Live Queue Display</Text>
+                <Text style={styles.liveSubtitle}>{liveRows.length} department{liveRows.length !== 1 ? 's' : ''} active</Text>
               </View>
-            </Card>
-
-            {/* 3. MAIN ACTION AREA */}
-            <View style={styles.mainActionArea}>
-              <TouchableOpacity
-                style={[styles.primaryActionBtn, prescriptionMode ? styles.activeActionBtn : null]}
-                onPress={() => setPrescriptionMode(prescriptionMode ? null : 'template')}
-              >
-                <FileText size={20} color={prescriptionMode ? "#fff" : "#2563eb"} />
-                <Text style={[styles.primaryActionText, prescriptionMode && { color: "#fff" }]}>Prescription</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.completeBtn} onPress={handleMarkComplete}>
-                <CheckCircle2 size={24} color="#fff" />
-                <Text style={styles.completeBtnText}>Mark Complete</Text>
-              </TouchableOpacity>
+              <View style={styles.liveUpdatedBadge}>
+                <Text style={styles.liveUpdatedText}>Updated {formatTime(lastUpdated)}</Text>
+              </View>
             </View>
 
-            {/* QR Scanner Section */}
-            <TouchableOpacity style={styles.scanQrBtn} onPress={openScanner}>
-               <QrCode size={20} color="#fff" />
-               <Text style={styles.scanQrBtnText}>Scan QR Code</Text>
-            </TouchableOpacity>
-
-            {/* QR Scanner Camera */}
-            {scannerOpen && (
-              <View style={styles.scannerContainer}>
-                <View style={styles.scannerHeader}>
-                  <Text style={styles.scannerTitle}>📷 Scanning...</Text>
-                  <TouchableOpacity onPress={closeScanner} style={styles.closeScannerBtn}>
-                    <Text style={styles.closeScannerText}>✕ Close</Text>
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.cameraWrapper}>
-                  <CameraView
-                    style={styles.camera}
-                    facing="back"
-                    barcodeScannerSettings={{
-                      barcodeTypes: ["qr"],
-                    }}
-                    onBarcodeScanned={handleBarCodeScanned}
-                  />
-                  {/* Scan overlay frame */}
-                  <View style={styles.scanOverlay}>
-                    <View style={styles.scanFrame}>
-                      <View style={[styles.scanCorner, styles.scanCornerTL]} />
-                      <View style={[styles.scanCorner, styles.scanCornerTR]} />
-                      <View style={[styles.scanCorner, styles.scanCornerBL]} />
-                      <View style={[styles.scanCorner, styles.scanCornerBR]} />
-                    </View>
-                    <Text style={styles.scanHintText}>Align QR code within the frame</Text>
-                  </View>
-                </View>
+            {liveRows.length === 0 ? (
+              <View style={styles.liveEmptyState}>
+                <Monitor size={52} color="#cbd5e1" />
+                <Text style={styles.liveEmptyTitle}>No Active Queues</Text>
+                <Text style={styles.liveEmptySub}>All departments are currently idle.</Text>
               </View>
-            )}
+            ) : (
+              liveRows.map(([deptName, val]) => {
+                const { dept, tokens: dTokens } = val;
+                const accent = getDeptAccent(dept?.type);
 
-            {/* Scan Result: Completed Patient */}
-            {lastScannedPatient && (
-              <View style={styles.scanResultContainer}>
-                <View style={styles.completedCard}>
-                  <View style={styles.completedHeader}>
-                    <CheckCircle2 size={20} color="#16a34a" />
-                    <Text style={styles.completedHeaderText}>Appointment Completed</Text>
-                  </View>
-                  <View style={styles.completedBody}>
-                    <View style={styles.completedTokenCircle}>
-                      <Text style={styles.completedTokenText}>{formatTokenId(lastScannedPatient.id)}</Text>
-                    </View>
-                    <View style={styles.completedInfo}>
-                      <Text style={styles.completedName}>{lastScannedPatient.patient?.name || "Patient"}</Text>
-                      <Text style={styles.completedDetail}>
-                        {lastScannedPatient.patient?.age || "--"} Yrs • {lastScannedPatient.primaryDepartment || "General"}
-                      </Text>
-                      <View style={styles.completedBadge}>
-                        <Text style={styles.completedBadgeText}>✓ Done</Text>
-                      </View>
-                    </View>
-                  </View>
-                </View>
+                // Sort tokens by priority then timestamp
+                const sorted = [...dTokens].sort((a, b) => {
+                  const pA = priorityMap[a.type] || 3;
+                  const pB = priorityMap[b.type] || 3;
+                  if (pA !== pB) return pA - pB;
+                  return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+                });
 
-                {/* Next Patient's Turn */}
-                {nextPatientAfterScan ? (
-                  <View style={styles.nextPatientCard}>
-                    <View style={styles.nextPatientHeader}>
-                      <Activity size={18} color="#2563eb" />
-                      <Text style={styles.nextPatientHeaderText}>Next Patient's Turn</Text>
-                    </View>
-                    <View style={styles.nextPatientBody}>
-                      <View style={[styles.nextTokenCircle, { backgroundColor: getPriorityColors(nextPatientAfterScan.type).bg }]}>
-                        <Text style={[styles.nextTokenText, { color: getPriorityColors(nextPatientAfterScan.type).text }]}>
-                          {formatTokenId(nextPatientAfterScan.id)}
-                        </Text>
-                      </View>
-                      <View style={styles.nextPatientInfo}>
-                        <Text style={styles.nextPatientName}>{nextPatientAfterScan.patient?.name || "Patient"}</Text>
-                        <Text style={styles.nextPatientDetail}>
-                          {nextPatientAfterScan.patient?.age || "--"} Yrs • {nextPatientAfterScan.primaryDepartment || "General"}
-                        </Text>
-                      </View>
-                      <View style={[styles.nextPriorityBadge, { borderColor: getPriorityColors(nextPatientAfterScan.type).border }]}>
-                        <Text style={[styles.nextPriorityText, { color: getPriorityColors(nextPatientAfterScan.type).text }]}>
-                          {getPriorityColors(nextPatientAfterScan.type).name}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                ) : (
-                  <View style={styles.noMorePatientsCard}>
-                    <CheckCircle2 size={24} color="#22c55e" />
-                    <Text style={styles.noMorePatientsText}>All appointments completed! 🎉</Text>
-                  </View>
-                )}
-              </View>
-            )}
+                const nowServingToken = sorted[0];
+                const nextToken = sorted[1];
 
-            {/* 4. PRESCRIPTION PANEL */}
-            {prescriptionMode && (
-              <View style={styles.prescriptionPanel}>
-                {/* 3 Row-wise options */}
-                <View style={styles.prescriptionTabs}>
-                  <TouchableOpacity 
-                    style={[styles.tabBtn, prescriptionMode === 'template' && styles.activeTab]}
-                    onPress={() => setPrescriptionMode('template')}
-                  >
-                     <Text style={[styles.tabText, prescriptionMode === 'template' && styles.activeTabText]}>Template</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={[styles.tabBtn, prescriptionMode === 'upload' && styles.activeTab]}
-                    onPress={() => setPrescriptionMode('upload')}
-                  >
-                     <Text style={[styles.tabText, prescriptionMode === 'upload' && styles.activeTabText]}>Upload</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={[styles.tabBtn, prescriptionMode === 'scan' && styles.activeTab]}
-                    onPress={() => setPrescriptionMode('scan')}
-                  >
-                     <Text style={[styles.tabText, prescriptionMode === 'scan' && styles.activeTabText]}>Scan</Text>
-                  </TouchableOpacity>
-                </View>
+                // Counter label from first available doctor or static fallback
+                const availDoc = dept?.doctors?.find(d => d.status === 'available');
+                const counterLabel = availDoc
+                  ? `Counter ${dept.doctors.indexOf(availDoc) + 1}`.padEnd(2)
+                  : 'Counter 01';
 
-                {/* 4A. USE PRESCRIPTION TEMPLATE */}
-                {prescriptionMode === 'template' && (
-                  <View style={styles.panelContent}>
-                    <Text style={styles.subTitle}>Quick Templates</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsContainer}>
-                      {TEMPLATES.map((tmpl, idx) => (
-                        <TouchableOpacity key={idx} style={styles.chip} onPress={() => handleApplyTemplate(tmpl)}>
-                          <Text style={styles.chipText}>{tmpl.name}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
+                const isActive = dTokens.length > 0 || (dept?.currentQueue ?? 0) > 0;
 
-                    <Text style={styles.label}>Problem / Diagnosis</Text>
-                    <TextInput 
-                      style={styles.inputArea} 
-                      value={diagnosis} 
-                      onChangeText={setDiagnosis}
-                      placeholder="Enter diagnosis..."
-                    />
+                return (
+                  <View key={deptName} style={styles.liveCard}>
+                    {/* Coloured left accent bar */}
+                    <View style={[styles.liveAccentBar, { backgroundColor: accent }]} />
 
-                    <Text style={[styles.label, {marginTop: 12}]}>Medicines & Dosage</Text>
-                    {medicines.map((med, index) => (
-                      <View key={index} style={styles.medicineRow}>
-                        <TextInput 
-                          style={[styles.inputField, {flex: 2}]} 
-                          placeholder="Medicine Name" 
-                          value={med.name} 
-                          onChangeText={(v) => updateMedicine(index, 'name', v)}
-                        />
-                        <View style={styles.medCol}>
-                           <TextInput 
-                             style={[styles.inputField, {marginBottom: 4}]} 
-                             placeholder="Dosage (e.g., 1-0-1)" 
-                             value={med.dosage} 
-                             onChangeText={(v) => updateMedicine(index, 'dosage', v)}
-                           />
-                           <View style={styles.quickDosages}>
-                             {QUICK_DOSAGE.map(q => (
-                               <TouchableOpacity key={q} style={styles.dosageChip} onPress={() => updateMedicine(index, 'dosage', q)}>
-                                 <Text style={styles.dosageChipText}>{q}</Text>
-                               </TouchableOpacity>
-                             ))}
-                           </View>
+                    <View style={styles.liveCardBody}>
+                      {/* Department name */}
+                      <Text style={styles.liveDeptName} numberOfLines={1}>{deptName}</Text>
+
+                      {/* Serving / Next row */}
+                      <View style={styles.liveInfoRow}>
+                        <View style={styles.liveInfoCell}>
+                          <Text style={styles.liveInfoLabel}>Now Serving</Text>
+                          <Text style={[styles.liveInfoValue, { color: accent }]}>
+                            {nowServingToken ? formatTokenId(nowServingToken.id) : '---'}
+                          </Text>
                         </View>
-                        <TextInput 
-                          style={[styles.inputField, {flex: 0.8}]} 
-                          placeholder="Days" 
-                          value={med.days} 
-                          keyboardType="numeric"
-                          onChangeText={(v) => updateMedicine(index, 'days', v)}
-                        />
+
+                        <View style={styles.liveDivider} />
+
+                        <View style={styles.liveInfoCell}>
+                          <Text style={styles.liveInfoLabel}>Next</Text>
+                          <Text style={styles.liveInfoValue}>
+                            {nextToken ? formatTokenId(nextToken.id) : '---'}
+                          </Text>
+                        </View>
+
+                        <View style={styles.liveDivider} />
+
+                        <View style={styles.liveInfoCell}>
+                          <Text style={styles.liveInfoLabel}>Counter</Text>
+                          <Text style={styles.liveInfoValue}>{counterLabel}</Text>
+                        </View>
+
+                        <View style={styles.liveDivider} />
+
+                        {/* Status badge */}
+                        <View style={[styles.liveStatusBadge, isActive ? styles.liveStatusActive : styles.liveStatusPaused]}>
+                          <Text style={styles.liveStatusDot}>{isActive ? '🟢' : '🟡'}</Text>
+                          <Text style={[styles.liveStatusText, { color: isActive ? '#16a34a' : '#d97706' }]}>
+                            {isActive ? 'Active' : 'Paused'}
+                          </Text>
+                        </View>
                       </View>
-                    ))}
-                    <TouchableOpacity style={styles.addMedBtn} onPress={addMedicineRow}>
-                      <Plus size={16} color="#2563eb" />
-                      <Text style={styles.addMedText}>Add Medicine</Text>
-                    </TouchableOpacity>
 
-                    <Text style={[styles.label, {marginTop: 12}]}>Advice / Precautions</Text>
-                    <TextInput 
-                      style={[styles.inputArea, {height: 60}]} 
-                      value={advice} 
-                      onChangeText={setAdvice}
-                      placeholder="Write short advice..."
-                      multiline
-                    />
-
-                    <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
-                      <Save size={18} color="#fff" style={{marginRight: 8}}/>
-                      <Text style={styles.saveRxText}>Save Prescription</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {/* 4B. UPLOAD PRESCRIPTION */}
-                {prescriptionMode === 'upload' && (
-                  <View style={styles.panelContent}>
-                    <View style={styles.uploadArea}>
-                      <Upload size={48} color="#94a3b8" style={{marginBottom: 12}}/>
-                      <Text style={styles.uploadText}>Tap to choose Image or PDF</Text>
-                      <TouchableOpacity style={styles.chooseFileBtn}>
-                        <Text style={styles.chooseFileText}>Choose File</Text>
-                      </TouchableOpacity>
+                      {/* Queue count footer */}
+                      <Text style={styles.liveQueueCount}>
+                        {dTokens.length > 0
+                          ? `${dTokens.length} patient${dTokens.length !== 1 ? 's' : ''} in queue`
+                          : `${dept?.currentQueue ?? 0} in queue`}
+                      </Text>
                     </View>
-                    <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
-                      <Save size={18} color="#fff" style={{marginRight: 8}}/>
-                      <Text style={styles.saveRxText}>Save Prescription</Text>
-                    </TouchableOpacity>
                   </View>
-                )}
-
-                {/* 4C. SCAN PRESCRIPTION */}
-                {prescriptionMode === 'scan' && (
-                  <View style={styles.panelContent}>
-                    <View style={styles.scanArea}>
-                      <Camera size={48} color="#94a3b8" style={{marginBottom: 12}}/>
-                      <Text style={styles.uploadText}>Camera Preview</Text>
-                      <View style={{flexDirection: 'row', gap: 12, marginTop: 16}}>
-                        <TouchableOpacity style={[styles.chooseFileBtn, {backgroundColor: '#e2e8f0'}]}>
-                          <Text style={[styles.chooseFileText, {color: '#475569'}]}>Start Camera</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.chooseFileBtn}>
-                          <Text style={styles.chooseFileText}>Capture Scan</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                    <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
-                      <Save size={18} color="#fff" style={{marginRight: 8}}/>
-                      <Text style={styles.saveRxText}>Save Prescription</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-            )}
-
-          </View>
-        ) : (
-          <View style={styles.emptyState}>
-            <CheckCircle2 size={64} color="#22c55e" style={{ marginBottom: 16 }} />
-            <Text style={styles.emptyTitle}>Queue Clear</Text>
-            <Text style={styles.emptySub}>No patients waiting for consultation.</Text>
-          </View>
-        )}
-
-        {/* 5. UPCOMING QUEUE SECTION */}
-        <View style={styles.queueSection}>
-          <Text style={styles.sectionTitle}>Upcoming Queue (All {upcomingQueue.length})</Text>
-          <ScrollView 
-            style={styles.upcomingQueueScroll} 
-            showsVerticalScrollIndicator={true}
-            nestedScrollEnabled={true}
-          >
-            {upcomingQueue.map((item) => (
-              <View key={item.id} style={styles.queueItem}>
-                <View style={[styles.smallTokenCircle, { backgroundColor: getPriorityColors(item.type).bg }]}>
-                  <Text style={[styles.smallTokenText, { color: getPriorityColors(item.type).text }]}>
-                    {formatTokenId(item.id)}
-                  </Text>
-                </View>
-                <View style={styles.queueItemInfo}>
-                  <Text style={styles.queueItemName}>{item.patient?.name || "Patient"}</Text>
-                  <Text style={styles.queueItemType}>{item.primaryDepartment || "General"}</Text>
-                </View>
-                <View style={[styles.queueBadge, { borderColor: getPriorityColors(item.type).border }]}>
-                  <Text style={[styles.queueBadgeText, { color: getPriorityColors(item.type).text }]}>
-                    {getPriorityColors(item.type).name}
-                  </Text>
-                </View>
-              </View>
-            ))}
-            {upcomingQueue.length === 0 && (
-              <Text style={styles.emptyQueueText}>No upcoming patients.</Text>
+                );
+              })
             )}
           </ScrollView>
-        </View>
+        );
+      })()}
 
-      </ScrollView>
+      {/* ══════════════════════════════════════════════════════════════════════
+          QUEUE MANAGEMENT TAB (existing content)
+      ══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'queue' && (
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          {/* 2. ACTIVE PATIENT CARD */}
+          {activePatient ? (
+            <View style={styles.activePatientContainer}>
+              <Text style={styles.sectionTitle}>Current Patient</Text>
+              <Card style={styles.activeCard}>
+                <View style={styles.activeCardContent}>
+                  <View style={styles.mainTokenArea}>
+                    <Text style={styles.tokenLabel}>TOKEN</Text>
+                    <Text style={styles.largeToken}>{formatTokenId(activePatient.id)}</Text>
+                    <View style={[styles.priorityBadge, { backgroundColor: getPriorityColors(activePatient.type).bg }]}>
+                      <Text style={[styles.priorityText, { color: getPriorityColors(activePatient.type).text }]}>
+                        {getPriorityColors(activePatient.type).name}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.patientDetails}>
+                    <Text style={styles.patientName}>{activePatient.patient?.name || "Patient Name"}</Text>
+                    <Text style={styles.patientAge}>
+                      {activePatient.patient?.age || "--"} Yrs • {activePatient.patient?.gender?.charAt(0).toUpperCase() || "U"}
+                    </Text>
+                    <View style={styles.infoRow}>
+                      <Stethoscope size={14} color="#64748b" />
+                      <Text style={styles.infoText}>{activePatient.primaryDepartment || "General Consultation"}</Text>
+                    </View>
+                    <View style={styles.infoRow}>
+                      <Activity size={14} color="#64748b" />
+                      <Text style={styles.infoText} numberOfLines={1}>
+                        Symptoms: Standard check-up
+                      </Text>
+                    </View>
+                    <View style={styles.verifyContainer}>
+                      <Text style={styles.verifyText}>ID: {activePatient.id.substring(0, 8).toUpperCase()}</Text>
+                    </View>
+                  </View>
+                </View>
+              </Card>
+
+              {/* 3. MAIN ACTION AREA */}
+              <View style={styles.mainActionArea}>
+                <TouchableOpacity
+                  style={[styles.primaryActionBtn, prescriptionMode ? styles.activeActionBtn : null]}
+                  onPress={() => setPrescriptionMode(prescriptionMode ? null : 'template')}
+                >
+                  <FileText size={20} color={prescriptionMode ? "#fff" : "#2563eb"} />
+                  <Text style={[styles.primaryActionText, prescriptionMode && { color: "#fff" }]}>Prescription</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.completeBtn} onPress={handleMarkComplete}>
+                  <CheckCircle2 size={24} color="#fff" />
+                  <Text style={styles.completeBtnText}>Mark Complete</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* QR Scanner Section */}
+              <TouchableOpacity style={styles.scanQrBtn} onPress={openScanner}>
+                <QrCode size={20} color="#fff" />
+                <Text style={styles.scanQrBtnText}>Scan QR Code</Text>
+              </TouchableOpacity>
+
+              {/* QR Scanner Camera */}
+              {scannerOpen && (
+                <View style={styles.scannerContainer}>
+                  <View style={styles.scannerHeader}>
+                    <Text style={styles.scannerTitle}>📷 Scanning...</Text>
+                    <TouchableOpacity onPress={closeScanner} style={styles.closeScannerBtn}>
+                      <Text style={styles.closeScannerText}>✕ Close</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.cameraWrapper}>
+                    <CameraView
+                      style={styles.camera}
+                      facing="back"
+                      barcodeScannerSettings={{
+                        barcodeTypes: ["qr"],
+                      }}
+                      onBarcodeScanned={handleBarCodeScanned}
+                    />
+                    {/* Scan overlay frame */}
+                    <View style={styles.scanOverlay}>
+                      <View style={styles.scanFrame}>
+                        <View style={[styles.scanCorner, styles.scanCornerTL]} />
+                        <View style={[styles.scanCorner, styles.scanCornerTR]} />
+                        <View style={[styles.scanCorner, styles.scanCornerBL]} />
+                        <View style={[styles.scanCorner, styles.scanCornerBR]} />
+                      </View>
+                      <Text style={styles.scanHintText}>Align QR code within the frame</Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* Scan Result: Completed Patient */}
+              {lastScannedPatient && (
+                <View style={styles.scanResultContainer}>
+                  <View style={styles.completedCard}>
+                    <View style={styles.completedHeader}>
+                      <CheckCircle2 size={20} color="#16a34a" />
+                      <Text style={styles.completedHeaderText}>Appointment Completed</Text>
+                    </View>
+                    <View style={styles.completedBody}>
+                      <View style={styles.completedTokenCircle}>
+                        <Text style={styles.completedTokenText}>{formatTokenId(lastScannedPatient.id)}</Text>
+                      </View>
+                      <View style={styles.completedInfo}>
+                        <Text style={styles.completedName}>{lastScannedPatient.patient?.name || "Patient"}</Text>
+                        <Text style={styles.completedDetail}>
+                          {lastScannedPatient.patient?.age || "--"} Yrs • {lastScannedPatient.primaryDepartment || "General"}
+                        </Text>
+                        <View style={styles.completedBadge}>
+                          <Text style={styles.completedBadgeText}>✓ Done</Text>
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Next Patient's Turn */}
+                  {nextPatientAfterScan ? (
+                    <View style={styles.nextPatientCard}>
+                      <View style={styles.nextPatientHeader}>
+                        <Activity size={18} color="#2563eb" />
+                        <Text style={styles.nextPatientHeaderText}>Next Patient's Turn</Text>
+                      </View>
+                      <View style={styles.nextPatientBody}>
+                        <View style={[styles.nextTokenCircle, { backgroundColor: getPriorityColors(nextPatientAfterScan.type).bg }]}>
+                          <Text style={[styles.nextTokenText, { color: getPriorityColors(nextPatientAfterScan.type).text }]}>
+                            {formatTokenId(nextPatientAfterScan.id)}
+                          </Text>
+                        </View>
+                        <View style={styles.nextPatientInfo}>
+                          <Text style={styles.nextPatientName}>{nextPatientAfterScan.patient?.name || "Patient"}</Text>
+                          <Text style={styles.nextPatientDetail}>
+                            {nextPatientAfterScan.patient?.age || "--"} Yrs • {nextPatientAfterScan.primaryDepartment || "General"}
+                          </Text>
+                        </View>
+                        <View style={[styles.nextPriorityBadge, { borderColor: getPriorityColors(nextPatientAfterScan.type).border }]}>
+                          <Text style={[styles.nextPriorityText, { color: getPriorityColors(nextPatientAfterScan.type).text }]}>
+                            {getPriorityColors(nextPatientAfterScan.type).name}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={styles.noMorePatientsCard}>
+                      <CheckCircle2 size={24} color="#22c55e" />
+                      <Text style={styles.noMorePatientsText}>All appointments completed! 🎉</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+
+              {/* 4. PRESCRIPTION PANEL */}
+              {prescriptionMode && (
+                <View style={styles.prescriptionPanel}>
+                  {/* 3 Row-wise options */}
+                  <View style={styles.prescriptionTabs}>
+                    <TouchableOpacity
+                      style={[styles.tabBtn, prescriptionMode === 'template' && styles.activeTab]}
+                      onPress={() => setPrescriptionMode('template')}
+                    >
+                      <Text style={[styles.tabText, prescriptionMode === 'template' && styles.activeTabText]}>Template</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.tabBtn, prescriptionMode === 'upload' && styles.activeTab]}
+                      onPress={() => setPrescriptionMode('upload')}
+                    >
+                      <Text style={[styles.tabText, prescriptionMode === 'upload' && styles.activeTabText]}>Upload</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.tabBtn, prescriptionMode === 'scan' && styles.activeTab]}
+                      onPress={() => setPrescriptionMode('scan')}
+                    >
+                      <Text style={[styles.tabText, prescriptionMode === 'scan' && styles.activeTabText]}>Scan</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* 4A. USE PRESCRIPTION TEMPLATE */}
+                  {prescriptionMode === 'template' && (
+                    <View style={styles.panelContent}>
+                      <Text style={styles.subTitle}>Quick Templates</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsContainer}>
+                        {TEMPLATES.map((tmpl, idx) => (
+                          <TouchableOpacity key={idx} style={styles.chip} onPress={() => handleApplyTemplate(tmpl)}>
+                            <Text style={styles.chipText}>{tmpl.name}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+
+                      <Text style={styles.label}>Problem / Diagnosis</Text>
+                      <TextInput
+                        style={styles.inputArea}
+                        value={diagnosis}
+                        onChangeText={setDiagnosis}
+                        placeholder="Enter diagnosis..."
+                      />
+
+                      <Text style={[styles.label, { marginTop: 12 }]}>Medicines & Dosage</Text>
+                      {medicines.map((med, index) => (
+                        <View key={index} style={styles.medicineRow}>
+                          <TextInput
+                            style={[styles.inputField, { flex: 2 }]}
+                            placeholder="Medicine Name"
+                            value={med.name}
+                            onChangeText={(v) => updateMedicine(index, 'name', v)}
+                          />
+                          <View style={styles.medCol}>
+                            <TextInput
+                              style={[styles.inputField, { marginBottom: 4 }]}
+                              placeholder="Dosage (e.g., 1-0-1)"
+                              value={med.dosage}
+                              onChangeText={(v) => updateMedicine(index, 'dosage', v)}
+                            />
+                            <View style={styles.quickDosages}>
+                              {QUICK_DOSAGE.map(q => (
+                                <TouchableOpacity key={q} style={styles.dosageChip} onPress={() => updateMedicine(index, 'dosage', q)}>
+                                  <Text style={styles.dosageChipText}>{q}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          </View>
+                          <TextInput
+                            style={[styles.inputField, { flex: 0.8 }]}
+                            placeholder="Days"
+                            value={med.days}
+                            keyboardType="numeric"
+                            onChangeText={(v) => updateMedicine(index, 'days', v)}
+                          />
+                        </View>
+                      ))}
+                      <TouchableOpacity style={styles.addMedBtn} onPress={addMedicineRow}>
+                        <Plus size={16} color="#2563eb" />
+                        <Text style={styles.addMedText}>Add Medicine</Text>
+                      </TouchableOpacity>
+
+                      <Text style={[styles.label, { marginTop: 12 }]}>Advice / Precautions</Text>
+                      <TextInput
+                        style={[styles.inputArea, { height: 60 }]}
+                        value={advice}
+                        onChangeText={setAdvice}
+                        placeholder="Write short advice..."
+                        multiline
+                      />
+
+                      <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
+                        <Save size={18} color="#fff" style={{ marginRight: 8 }} />
+                        <Text style={styles.saveRxText}>Save Prescription</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {/* 4B. UPLOAD PRESCRIPTION */}
+                  {prescriptionMode === 'upload' && (
+                    <View style={styles.panelContent}>
+                      <View style={styles.uploadArea}>
+                        <Upload size={48} color="#94a3b8" style={{ marginBottom: 12 }} />
+                        <Text style={styles.uploadText}>Tap to choose Image or PDF</Text>
+                        <TouchableOpacity style={styles.chooseFileBtn}>
+                          <Text style={styles.chooseFileText}>Choose File</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
+                        <Save size={18} color="#fff" style={{ marginRight: 8 }} />
+                        <Text style={styles.saveRxText}>Save Prescription</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {/* 4C. SCAN PRESCRIPTION */}
+                  {prescriptionMode === 'scan' && (
+                    <View style={styles.panelContent}>
+                      <View style={styles.scanArea}>
+                        <Camera size={48} color="#94a3b8" style={{ marginBottom: 12 }} />
+                        <Text style={styles.uploadText}>Camera Preview</Text>
+                        <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
+                          <TouchableOpacity style={[styles.chooseFileBtn, { backgroundColor: '#e2e8f0' }]}>
+                            <Text style={[styles.chooseFileText, { color: '#475569' }]}>Start Camera</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={styles.chooseFileBtn}>
+                            <Text style={styles.chooseFileText}>Capture Scan</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                      <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
+                        <Save size={18} color="#fff" style={{ marginRight: 8 }} />
+                        <Text style={styles.saveRxText}>Save Prescription</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              )}
+
+            </View>
+          ) : (
+            <View style={styles.emptyState}>
+              <CheckCircle2 size={64} color="#22c55e" style={{ marginBottom: 16 }} />
+              <Text style={styles.emptyTitle}>Queue Clear</Text>
+              <Text style={styles.emptySub}>No patients waiting for consultation.</Text>
+            </View>
+          )}
+
+          {/* 5. UPCOMING QUEUE SECTION */}
+          <View style={styles.queueSection}>
+            <Text style={styles.sectionTitle}>Upcoming Queue (All {upcomingQueue.length})</Text>
+            <ScrollView
+              style={styles.upcomingQueueScroll}
+              showsVerticalScrollIndicator={true}
+              nestedScrollEnabled={true}
+            >
+              {upcomingQueue.map((item) => (
+                <View key={item.id} style={styles.queueItem}>
+                  <View style={[styles.smallTokenCircle, { backgroundColor: getPriorityColors(item.type).bg }]}>
+                    <Text style={[styles.smallTokenText, { color: getPriorityColors(item.type).text }]}>
+                      {formatTokenId(item.id)}
+                    </Text>
+                  </View>
+                  <View style={styles.queueItemInfo}>
+                    <Text style={styles.queueItemName}>{item.patient?.name || "Patient"}</Text>
+                    <Text style={styles.queueItemType}>{item.primaryDepartment || "General"}</Text>
+                  </View>
+                  <View style={[styles.queueBadge, { borderColor: getPriorityColors(item.type).border }]}>
+                    <Text style={[styles.queueBadgeText, { color: getPriorityColors(item.type).text }]}>
+                      {getPriorityColors(item.type).name}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+              {upcomingQueue.length === 0 && (
+                <Text style={styles.emptyQueueText}>No upcoming patients.</Text>
+              )}
+            </ScrollView>
+          </View>
+
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -1048,4 +1238,99 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 22, fontWeight: "700", color: "#0f172a", marginBottom: 8 },
   emptySub: { fontSize: 15, color: "#64748b", textAlign: "center" },
   upcomingQueueScroll: { maxHeight: 350, marginTop: 4 },
+
+  // ─── Main Tab Bar ───────────────────────────────────────────────────────
+  mainTabBar: {
+    flexDirection: "row",
+    borderTopWidth: 1,
+    borderTopColor: "#f1f5f9",
+    backgroundColor: "#ffffff",
+  },
+  mainTabBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 11,
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  mainTabBtnActive: {
+    borderBottomColor: "#2563eb",
+    backgroundColor: "#eff6ff",
+  },
+  mainTabText: { fontSize: 13, fontWeight: "600", color: "#64748b" },
+  mainTabTextActive: { color: "#2563eb" },
+
+  // ─── Live Queue Display ─────────────────────────────────────────────────
+  liveHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  liveTitle: { fontSize: 18, fontWeight: "800", color: "#0f172a" },
+  liveSubtitle: { fontSize: 13, color: "#64748b", marginTop: 2 },
+  liveUpdatedBadge: {
+    backgroundColor: "#f1f5f9",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+  liveUpdatedText: { fontSize: 11, color: "#475569", fontWeight: "600" },
+  liveEmptyState: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 60,
+    backgroundColor: "#ffffff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  liveEmptyTitle: { fontSize: 20, fontWeight: "700", color: "#334155", marginTop: 16, marginBottom: 6 },
+  liveEmptySub: { fontSize: 14, color: "#94a3b8", textAlign: "center" },
+  liveCard: {
+    flexDirection: "row",
+    backgroundColor: "#ffffff",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    marginBottom: 10,
+    overflow: "hidden",
+    elevation: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+  },
+  liveAccentBar: { width: 5 },
+  liveCardBody: { flex: 1, padding: 14 },
+  liveDeptName: { fontSize: 15, fontWeight: "800", color: "#0f172a", marginBottom: 10 },
+  liveInfoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f8fafc",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    marginBottom: 8,
+  },
+  liveInfoCell: { flex: 1, alignItems: "center" },
+  liveInfoLabel: { fontSize: 10, color: "#94a3b8", fontWeight: "700", letterSpacing: 0.5, marginBottom: 3, textTransform: "uppercase" },
+  liveInfoValue: { fontSize: 16, fontWeight: "900", color: "#0f172a" },
+  liveDivider: { width: 1, height: 36, backgroundColor: "#e2e8f0", marginHorizontal: 4 },
+  liveStatusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  liveStatusActive: { backgroundColor: "#f0fdf4" },
+  liveStatusPaused: { backgroundColor: "#fffbeb" },
+  liveStatusDot: { fontSize: 10 },
+  liveStatusText: { fontSize: 11, fontWeight: "700" },
+  liveQueueCount: { fontSize: 12, color: "#94a3b8", fontWeight: "500" },
 });
