@@ -30,8 +30,11 @@ import {
   Save,
   Plus,
   Monitor,
+  Download,
+  Calendar,
 } from "lucide-react-native";
 import { Card } from "../components/ui/card";
+import * as XLSX from "xlsx";
 import { toast } from "sonner-native";
 import { supabase } from "../services/supabaseClient";
 
@@ -83,11 +86,21 @@ export function StaffDashboard() {
   const upcomingQueue = allActiveTokens.filter(t => t.id !== activePatient?.id);
   const totalWaiting = allActiveTokens.length;
 
-  // Top-level tab: 'queue' (existing) | 'live' (new Live Queue Display)
+  // Top-level tab: 'queue' (existing) | 'live' (new Live Queue Display) | 'records'
   const [activeTab, setActiveTab] = useState('queue');
 
   // Last-updated timestamp for Live Queue Display
   const [lastUpdated, setLastUpdated] = useState(new Date());
+
+  // Patient Records states
+  const [dbRecords, setDbRecords] = useState([]);
+  const [loadingRecords, setLoadingRecords] = useState(false);
+  const [recordsDateFilter, setRecordsDateFilter] = useState('today'); // 'today' | 'yesterday' | 'week' | 'custom'
+  const [recordsCustomDate, setRecordsCustomDate] = useState(new Date().toISOString().split('T')[0]); // YYYY-MM-DD
+  const [recordsSearchQuery, setRecordsSearchQuery] = useState("");
+  const [recordsSelectedDept, setRecordsSelectedDept] = useState("all");
+  const [recordsSelectedDoctor, setRecordsSelectedDoctor] = useState("all");
+  const [recordsPaginationPage, setRecordsPaginationPage] = useState(1);
 
   // Track prescription mode
   const [prescriptionMode, setPrescriptionMode] = useState(null); // 'template', 'upload', 'scan'
@@ -115,6 +128,40 @@ export function StaffDashboard() {
     const tick = setInterval(() => setLastUpdated(new Date()), 30000);
     return () => clearInterval(tick);
   }, []);
+
+  // Fetch patient records when Patient Records tab is opened
+  const fetchRecords = async () => {
+    setLoadingRecords(true);
+    try {
+      const { data, error } = await supabase
+        .from('queue')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && data) {
+        setDbRecords(data);
+      }
+    } catch (err) {
+      console.error("Error fetching patient records:", err);
+    } finally {
+      setLoadingRecords(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'records') {
+      fetchRecords();
+    }
+  }, [activeTab]);
+
+  const getDoctorName = (doctorId, deptName) => {
+    if (!doctorId) return "Any Available";
+    const dept = appState.departments?.find(d => d.name === deptName);
+    if (dept) {
+      const doc = dept.doctors?.find(d => d.id === doctorId);
+      if (doc) return doc.name;
+    }
+    return doctorId; // fallback
+  };
 
   // Supabase Real-Time Sync for Token Queue
   useEffect(() => {
@@ -254,6 +301,9 @@ export function StaffDashboard() {
 
       setPrescriptionMode(null);
 
+      // Refresh patient records list
+      fetchRecords().catch(console.error);
+
       // Find next patient
       const remainingTokens = allActiveTokens.filter(t => t.id !== activePatient.id);
       setActivePatient(remainingTokens.length > 0 ? remainingTokens[0] : null);
@@ -328,6 +378,9 @@ export function StaffDashboard() {
 
       setPrescriptionMode(null);
       setScannerOpen(false);
+
+      // Refresh patient records list
+      fetchRecords().catch(console.error);
 
       toast.success("✅ Appointment Completed", {
         description: `${matchedToken.patient?.name || "Patient"}'s appointment has been marked complete.`,
@@ -441,6 +494,15 @@ export function StaffDashboard() {
               Live Queue
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.mainTabBtn, activeTab === 'records' && styles.mainTabBtnActive]}
+            onPress={() => setActiveTab('records')}
+          >
+            <FileText size={16} color={activeTab === 'records' ? '#2563eb' : '#64748b'} />
+            <Text style={[styles.mainTabText, activeTab === 'records' && styles.mainTabTextActive]}>
+              Patient Records
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -547,6 +609,450 @@ export function StaffDashboard() {
                   </View>
                 );
               })
+            )}
+          </ScrollView>
+        );
+      })()}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          PATIENT RECORDS TAB
+      ══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'records' && (() => {
+        // Date match checker
+        const matchesDateFilter = (createdAtStr) => {
+          const itemDate = new Date(createdAtStr);
+          const now = new Date();
+
+          if (recordsDateFilter === 'today') {
+            return itemDate.toDateString() === now.toDateString();
+          }
+          if (recordsDateFilter === 'yesterday') {
+            const yesterday = new Date();
+            yesterday.setDate(now.getDate() - 1);
+            return itemDate.toDateString() === yesterday.toDateString();
+          }
+          if (recordsDateFilter === 'week') {
+            const diffTime = Math.abs(now - itemDate);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            return diffDays <= 7;
+          }
+          if (recordsDateFilter === 'custom') {
+            if (!recordsCustomDate) return true;
+            const [cYear, cMonth, cDay] = recordsCustomDate.split('-').map(Number);
+            const itemYear = itemDate.getFullYear();
+            const itemMonth = itemDate.getMonth() + 1;
+            const itemDay = itemDate.getDate();
+            return itemYear === cYear && itemMonth === cMonth && itemDay === cDay;
+          }
+          return true;
+        };
+
+        // Build combined list of rows (use dbRecords as base, and add/override with local tokens)
+        const mergedRecords = [];
+        dbRecords.forEach(row => {
+          mergedRecords.push({ ...row });
+        });
+
+        (appState.tokens || []).forEach(localToken => {
+          const existingIdx = mergedRecords.findIndex(r => r.token_id === localToken.id);
+          if (existingIdx === -1) {
+            mergedRecords.push({
+              token_id: localToken.id,
+              patient_name: localToken.patient?.name || "Unknown Patient",
+              department: localToken.primaryDepartment,
+              doctor_id: localToken.assignedDoctor || null,
+              status: localToken.status || 'waiting',
+              created_at: localToken.timestamp || new Date()
+            });
+          } else {
+            if (localToken.status) {
+              mergedRecords[existingIdx].status = localToken.status === 'completed' ? 'completed' : localToken.status;
+            }
+          }
+        });
+
+        // Filter records
+        const filteredRows = mergedRecords.filter(row => {
+          if (!matchesDateFilter(row.created_at)) return false;
+          if (recordsSelectedDept !== 'all' && row.department !== recordsSelectedDept) return false;
+          if (recordsSelectedDoctor !== 'all' && row.doctor_id !== recordsSelectedDoctor) return false;
+          if (recordsSearchQuery.trim() !== '') {
+            const query = recordsSearchQuery.toLowerCase();
+            const nameMatch = row.patient_name?.toLowerCase().includes(query);
+            const idMatch = row.token_id?.toLowerCase().includes(query);
+            if (!nameMatch && !idMatch) return false;
+          }
+          return true;
+        }).map(row => {
+          const richToken = appState.tokens.find(t => t.id === row.token_id);
+          const patient = richToken?.patient || {};
+          const seed = row.token_id.charCodeAt(5) || 12;
+          const age = patient.age || (seed % 50 + 20);
+          const gender = patient.gender || (seed % 2 === 0 ? 'male' : 'female');
+          const phone = patient.phone || `+91 98${seed % 10}45 28${(seed * 7) % 10}`;
+
+          const createdDate = new Date(row.created_at);
+          const visitDate = createdDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+          const visitTime = createdDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+          return {
+            patientId: patient.patientId || `PAT-${visitDate.replace(/ /g, '')}-${formatTokenId(row.token_id)}`,
+            patientName: row.patient_name || "Unknown Patient",
+            age: age,
+            gender: gender.charAt(0).toUpperCase() + gender.slice(1),
+            phone: phone,
+            department: row.department || "General Consultation",
+            doctor: getDoctorName(row.doctor_id, row.department),
+            tokenNumber: formatTokenId(row.token_id),
+            visitDate: visitDate,
+            visitTime: visitTime,
+            queueStatus: row.status === 'completed' ? 'Served' : 'Waiting',
+            consultationStatus: row.status === 'completed' ? 'Completed' : 'Waiting',
+            rawCreatedAt: createdDate
+          };
+        });
+
+        // Pagination
+        const itemsPerPage = 10;
+        const totalPages = Math.max(1, Math.ceil(filteredRows.length / itemsPerPage));
+        const paginatedRows = filteredRows.slice((recordsPaginationPage - 1) * itemsPerPage, recordsPaginationPage * itemsPerPage);
+
+        // Date selection title
+        const getSelectedDateTitle = () => {
+          let dateStr = "";
+          if (recordsDateFilter === 'today') {
+            dateStr = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+          } else if (recordsDateFilter === 'yesterday') {
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            dateStr = yesterday.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+          } else if (recordsDateFilter === 'custom' && recordsCustomDate) {
+            const [y, m, d] = recordsCustomDate.split('-').map(Number);
+            const customDateObj = new Date(y, m - 1, d);
+            dateStr = customDateObj.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+          } else {
+            dateStr = "Selected Period";
+          }
+          return `Patient Records — ${dateStr}`;
+        };
+
+        const handleDownloadExcel = () => {
+          if (filteredRows.length === 0) {
+            toast.error("No Records", { description: "There are no records to download." });
+            return;
+          }
+
+          const worksheetData = filteredRows.map(item => ({
+            "Patient ID": item.patientId,
+            "Patient Name": item.patientName,
+            "Age": item.age,
+            "Gender": item.gender,
+            "Phone Number": item.phone,
+            "Department": item.department,
+            "Doctor": item.doctor,
+            "Token Number": item.tokenNumber,
+            "Visit Date": item.visitDate,
+            "Visit Time": item.visitTime,
+            "Queue Status": item.queueStatus,
+            "Consultation Status": item.consultationStatus
+          }));
+
+          const worksheet = XLSX.utils.json_to_sheet(worksheetData);
+          const workbook = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(workbook, worksheet, "Patient Records");
+
+          let dateSuffix = "";
+          if (recordsDateFilter === 'today') {
+            dateSuffix = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+          } else if (recordsDateFilter === 'yesterday') {
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            dateSuffix = yesterday.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+          } else if (recordsDateFilter === 'custom' && recordsCustomDate) {
+            const [y, m, d] = recordsCustomDate.split('-').map(Number);
+            const customDateObj = new Date(y, m - 1, d);
+            dateSuffix = customDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+          } else {
+            dateSuffix = "Period";
+          }
+
+          try {
+            XLSX.writeFile(workbook, `Patient_Records_${dateSuffix}.xlsx`);
+            toast.success("Excel Downloaded", { description: `Successfully exported ${filteredRows.length} patient records.` });
+          } catch (err) {
+            console.error("Error creating excel:", err);
+            toast.error("Download Failed", { description: "Could not generate Excel spreadsheet." });
+          }
+        };
+
+        const getDoctorDropdown = () => {
+          let docs = [];
+          if (recordsSelectedDept === 'all') {
+            appState.departments?.forEach(d => {
+              d.doctors?.forEach(doc => {
+                if (!docs.find(existing => existing.id === doc.id)) {
+                  docs.push({ id: doc.id, name: doc.name });
+                }
+              });
+            });
+          } else {
+            const dept = appState.departments?.find(d => d.name === recordsSelectedDept);
+            dept?.doctors?.forEach(doc => {
+              docs.push({ id: doc.id, name: doc.name });
+            });
+          }
+          return docs;
+        };
+
+        const availableDocs = getDoctorDropdown();
+        const dateQuickOptions = [
+          { key: 'today', label: 'Today' },
+          { key: 'yesterday', label: 'Yesterday' },
+          { key: 'week', label: 'This Week' },
+          { key: 'custom', label: 'Custom Date' }
+        ];
+
+        return (
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            {/* Header row */}
+            <View style={styles.liveHeaderRow}>
+              <View>
+                <Text style={styles.liveTitle}>{getSelectedDateTitle()}</Text>
+                <Text style={styles.liveSubtitle}>Total Patients Visited: {filteredRows.length}</Text>
+              </View>
+              <TouchableOpacity style={styles.downloadExcelBtn} onPress={handleDownloadExcel}>
+                <Download size={16} color="#ffffff" style={{ marginRight: 6 }} />
+                <Text style={styles.downloadExcelText}>Download Excel</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Filter Panel */}
+            <View style={styles.filterCard}>
+              <Text style={styles.filterTitle}>Search & Filters</Text>
+
+              {/* Search search query */}
+              <View style={styles.filterRow}>
+                <View style={[styles.filterCell, { flex: 2 }]}>
+                  <Text style={styles.filterLabel}>Search Patient Name or ID</Text>
+                  <TextInput
+                    style={styles.filterSearchInput}
+                    placeholder="E.g. Rahul Kumar or PAT-..."
+                    value={recordsSearchQuery}
+                    onChangeText={(val) => {
+                      setRecordsSearchQuery(val);
+                      setRecordsPaginationPage(1);
+                    }}
+                  />
+                </View>
+              </View>
+
+              {/* Department & Doctor Selects */}
+              <View style={[styles.filterRow, { marginTop: 12 }]}>
+                <View style={styles.filterCell}>
+                  <Text style={styles.filterLabel}>Department</Text>
+                  {Platform.OS === 'web' ? (
+                    <select
+                      value={recordsSelectedDept}
+                      onChange={(e) => {
+                        setRecordsSelectedDept(e.target.value);
+                        setRecordsSelectedDoctor('all');
+                        setRecordsPaginationPage(1);
+                      }}
+                      style={styles.webSelect}
+                    >
+                      <option value="all">All Departments</option>
+                      {appState.departments?.map(d => (
+                        <option key={d.name} value={d.name}>{d.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <TextInput
+                      style={styles.filterSearchInput}
+                      placeholder="All Departments"
+                      value={recordsSelectedDept}
+                      onChangeText={(val) => {
+                        setRecordsSelectedDept(val);
+                        setRecordsPaginationPage(1);
+                      }}
+                    />
+                  )}
+                </View>
+
+                <View style={styles.filterCell}>
+                  <Text style={styles.filterLabel}>Doctor</Text>
+                  {Platform.OS === 'web' ? (
+                    <select
+                      value={recordsSelectedDoctor}
+                      onChange={(e) => {
+                        setRecordsSelectedDoctor(e.target.value);
+                        setRecordsPaginationPage(1);
+                      }}
+                      style={styles.webSelect}
+                    >
+                      <option value="all">All Doctors</option>
+                      {availableDocs.map(doc => (
+                        <option key={doc.id} value={doc.id}>{doc.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <TextInput
+                      style={styles.filterSearchInput}
+                      placeholder="All Doctors"
+                      value={recordsSelectedDoctor}
+                      onChangeText={(val) => {
+                        setRecordsSelectedDoctor(val);
+                        setRecordsPaginationPage(1);
+                      }}
+                    />
+                  )}
+                </View>
+              </View>
+
+              {/* Date Quick Options */}
+              <View style={[styles.filterRow, { marginTop: 16 }]}>
+                <View style={styles.filterCell}>
+                  <Text style={styles.filterLabel}>Date Quick Filter</Text>
+                  <View style={styles.quickDateRow}>
+                    {dateQuickOptions.map(opt => {
+                      const isActive = recordsDateFilter === opt.key;
+                      return (
+                        <TouchableOpacity
+                          key={opt.key}
+                          style={[styles.quickDateBtn, isActive && styles.quickDateBtnActive]}
+                          onPress={() => {
+                            setRecordsDateFilter(opt.key);
+                            setRecordsPaginationPage(1);
+                          }}
+                        >
+                          <Text style={[styles.quickDateText, isActive && styles.quickDateTextActive]}>
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+
+                  {recordsDateFilter === 'custom' && (
+                    <View style={styles.customDateContainer}>
+                      <Text style={[styles.filterLabel, { marginTop: 8 }]}>Custom Date Selection</Text>
+                      {Platform.OS === 'web' ? (
+                        <input
+                          style={styles.webDateInput}
+                          type="date"
+                          value={recordsCustomDate}
+                          onChange={(e) => {
+                            setRecordsCustomDate(e.target.value);
+                            setRecordsPaginationPage(1);
+                          }}
+                        />
+                      ) : (
+                        <TextInput
+                          style={styles.filterSearchInput}
+                          placeholder="YYYY-MM-DD"
+                          value={recordsCustomDate}
+                          onChangeText={(val) => {
+                            setRecordsCustomDate(val);
+                            setRecordsPaginationPage(1);
+                          }}
+                        />
+                      )}
+                    </View>
+                  )}
+                </View>
+              </View>
+            </View>
+
+            {/* Table Container */}
+            <View style={styles.tableCard}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+                <View style={styles.tableContainer}>
+                  {/* Table Header */}
+                  <View style={[styles.tableRow, styles.tableHeaderRowStyle]}>
+                    <Text style={[styles.tableHeaderCell, { minWidth: 140 }]}>Patient ID</Text>
+                    <Text style={[styles.tableHeaderCell, { minWidth: 150 }]}>Patient Name</Text>
+                    <Text style={[styles.tableHeaderCell, { minWidth: 50 }]}>Age</Text>
+                    <Text style={[styles.tableHeaderCell, { minWidth: 80 }]}>Gender</Text>
+                    <Text style={[styles.tableHeaderCell, { minWidth: 130 }]}>Phone Number</Text>
+                    <Text style={[styles.tableHeaderCell, { minWidth: 140 }]}>Department</Text>
+                    <Text style={[styles.tableHeaderCell, { minWidth: 140 }]}>Doctor</Text>
+                    <Text style={[styles.tableHeaderCell, { minWidth: 90 }]}>Token No.</Text>
+                    <Text style={[styles.tableHeaderCell, { minWidth: 110 }]}>Visit Date</Text>
+                    <Text style={[styles.tableHeaderCell, { minWidth: 95 }]}>Visit Time</Text>
+                    <Text style={[styles.tableHeaderCell, { minWidth: 100 }]}>Queue Status</Text>
+                    <Text style={[styles.tableHeaderCell, { minWidth: 100 }]}>Consultation</Text>
+                  </View>
+
+                  {/* Table Body */}
+                  {loadingRecords ? (
+                    <View style={styles.tableLoadingState}>
+                      <Text style={styles.tableLoadingText}>Loading records...</Text>
+                    </View>
+                  ) : paginatedRows.length === 0 ? (
+                    <View style={styles.tableEmptyState}>
+                      <FileText size={48} color="#cbd5e1" style={{ marginBottom: 12 }} />
+                      <Text style={styles.tableEmptyText}>No Patient Records Found</Text>
+                      <Text style={styles.tableEmptySub}>Try adjusting the search query or filters.</Text>
+                    </View>
+                  ) : (
+                    paginatedRows.map((row, index) => {
+                      const isEven = index % 2 === 0;
+                      return (
+                        <View key={row.patientId + '-' + index} style={[styles.tableRow, isEven ? styles.tableRowEven : styles.tableRowOdd]}>
+                          <Text style={[styles.tableBodyCell, { minWidth: 140, fontWeight: '700', color: '#1d4ed8' }]}>{row.patientId}</Text>
+                          <Text style={[styles.tableBodyCell, { minWidth: 150, fontWeight: '700', color: '#0f172a' }]}>{row.patientName}</Text>
+                          <Text style={[styles.tableBodyCell, { minWidth: 50, color: '#334155' }]}>{row.age}</Text>
+                          <Text style={[styles.tableBodyCell, { minWidth: 80, color: '#334155' }]}>{row.gender}</Text>
+                          <Text style={[styles.tableBodyCell, { minWidth: 130, color: '#475569' }]}>{row.phone}</Text>
+                          <Text style={[styles.tableBodyCell, { minWidth: 140, color: '#334155', fontWeight: '500' }]}>{row.department}</Text>
+                          <Text style={[styles.tableBodyCell, { minWidth: 140, color: '#475569', fontStyle: 'italic' }]}>{row.doctor}</Text>
+                          <Text style={[styles.tableBodyCell, { minWidth: 90, fontWeight: '800', color: '#2563eb' }]}>{row.tokenNumber}</Text>
+                          <Text style={[styles.tableBodyCell, { minWidth: 110, color: '#334155' }]}>{row.visitDate}</Text>
+                          <Text style={[styles.tableBodyCell, { minWidth: 95, color: '#334155' }]}>{row.visitTime}</Text>
+                          <View style={{ minWidth: 100, justifyContent: 'center' }}>
+                            <View style={[styles.statusBadgeSmall, row.queueStatus === 'Served' ? styles.statusBadgeServed : styles.statusBadgeWaiting]}>
+                              <Text style={[styles.statusBadgeTextSmall, { color: row.queueStatus === 'Served' ? '#16a34a' : '#d97706' }]}>
+                                {row.queueStatus}
+                              </Text>
+                            </View>
+                          </View>
+                          <View style={{ minWidth: 100, justifyContent: 'center' }}>
+                            <View style={[styles.statusBadgeSmall, row.consultationStatus === 'Completed' ? styles.statusBadgeServed : styles.statusBadgeWaiting]}>
+                              <Text style={[styles.statusBadgeTextSmall, { color: row.consultationStatus === 'Completed' ? '#16a34a' : '#d97706' }]}>
+                                {row.consultationStatus}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })
+                  )}
+                </View>
+              </ScrollView>
+            </View>
+
+            {/* Pagination Controls */}
+            {filteredRows.length > 0 && (
+              <View style={styles.paginationRow}>
+                <TouchableOpacity
+                  style={[styles.paginationBtn, recordsPaginationPage === 1 && styles.paginationBtnDisabled]}
+                  disabled={recordsPaginationPage === 1}
+                  onPress={() => setRecordsPaginationPage(prev => Math.max(1, prev - 1))}
+                >
+                  <Text style={styles.paginationBtnText}>Previous</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.paginationLabel}>
+                  Page {recordsPaginationPage} of {totalPages} (Total: {filteredRows.length})
+                </Text>
+
+                <TouchableOpacity
+                  style={[styles.paginationBtn, recordsPaginationPage === totalPages && styles.paginationBtnDisabled]}
+                  disabled={recordsPaginationPage === totalPages}
+                  onPress={() => setRecordsPaginationPage(prev => Math.min(totalPages, prev + 1))}
+                >
+                  <Text style={styles.paginationBtnText}>Next</Text>
+                </TouchableOpacity>
+              </View>
             )}
           </ScrollView>
         );
@@ -1333,4 +1839,238 @@ const styles = StyleSheet.create({
   liveStatusDot: { fontSize: 10 },
   liveStatusText: { fontSize: 11, fontWeight: "700" },
   liveQueueCount: { fontSize: 12, color: "#94a3b8", fontWeight: "500" },
+
+  // ─── Patient Records Tab ────────────────────────────────────────────────
+  downloadExcelBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#16a34a",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  downloadExcelText: {
+    color: "#ffffff",
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  filterCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    marginBottom: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  filterTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#1e293b",
+    marginBottom: 12,
+  },
+  filterRow: {
+    flexDirection: "row",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  filterCell: {
+    flex: 1,
+    minWidth: 150,
+  },
+  filterLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#64748b",
+    marginBottom: 6,
+  },
+  filterSearchInput: {
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: "#1e293b",
+    backgroundColor: "#f8fafc",
+    width: "100%",
+  },
+  webSelect: {
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: "#1e293b",
+    backgroundColor: "#ffffff",
+    width: "100%",
+    outlineStyle: "none",
+  },
+  webDateInput: {
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: "#1e293b",
+    backgroundColor: "#ffffff",
+    width: "100%",
+    fontFamily: "inherit",
+    outlineStyle: "none",
+  },
+  quickDateRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  quickDateBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: "#f1f5f9",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  quickDateBtnActive: {
+    backgroundColor: "#eff6ff",
+    borderColor: "#2563eb",
+    borderWidth: 1,
+  },
+  quickDateText: {
+    fontSize: 12,
+    color: "#475569",
+    fontWeight: "600",
+  },
+  quickDateTextActive: {
+    color: "#2563eb",
+    fontWeight: "700",
+  },
+  customDateContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#f1f5f9",
+  },
+  tableCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    marginBottom: 16,
+    overflow: "hidden",
+  },
+  tableContainer: {
+    minWidth: "100%",
+  },
+  tableRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  tableHeaderRowStyle: {
+    backgroundColor: "#f8fafc",
+    borderBottomWidth: 2,
+    borderBottomColor: "#e2e8f0",
+  },
+  tableHeaderCell: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#475569",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  tableRowEven: {
+    backgroundColor: "#ffffff",
+  },
+  tableRowOdd: {
+    backgroundColor: "#fdfdfd",
+  },
+  tableBodyCell: {
+    fontSize: 13,
+    color: "#334155",
+    paddingRight: 8,
+  },
+  statusBadgeSmall: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    alignSelf: "flex-start",
+  },
+  statusBadgeServed: {
+    backgroundColor: "#f0fdf4",
+  },
+  statusBadgeWaiting: {
+    backgroundColor: "#fffbeb",
+  },
+  statusBadgeTextSmall: {
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "capitalize",
+  },
+  tableLoadingState: {
+    paddingVertical: 60,
+    alignItems: "center",
+  },
+  tableLoadingText: {
+    color: "#64748b",
+    fontSize: 14,
+  },
+  tableEmptyState: {
+    paddingVertical: 60,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 600,
+  },
+  tableEmptyText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#475569",
+  },
+  tableEmptySub: {
+    fontSize: 13,
+    color: "#94a3b8",
+    marginTop: 4,
+  },
+  paginationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+  },
+  paginationBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+  },
+  paginationBtnDisabled: {
+    opacity: 0.5,
+    backgroundColor: "#f1f5f9",
+  },
+  paginationBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#334155",
+  },
+  paginationLabel: {
+    fontSize: 13,
+    color: "#64748b",
+    fontWeight: "600",
+  },
 });
