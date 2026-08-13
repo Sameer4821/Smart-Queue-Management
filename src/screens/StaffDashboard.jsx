@@ -8,9 +8,11 @@ import {
   TextInput,
   Image,
   Dimensions,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAppContext } from "../context/AppContext";
+import { supabase } from "../services/supabaseClient";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { translations } from "../translations/translations";
 import {
@@ -29,14 +31,11 @@ import {
   QrCode,
   Save,
   Plus,
-  Monitor,
-  Download,
-  Calendar,
+  Volume2
 } from "lucide-react-native";
 import { Card } from "../components/ui/card";
-import * as XLSX from "xlsx";
 import { toast } from "sonner-native";
-import { supabase } from "../services/supabaseClient";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../components/ui/select";
 
 // Template data
 const TEMPLATES = [
@@ -56,51 +55,34 @@ const QUICK_DOSAGE = ["1-0-1", "1-1-1", "0-0-1", "SOS"];
 export function StaffDashboard() {
   const { state: appState, setState: setAppState, addPrescriptionToToken } = useAppContext();
   const t = translations[appState.language] || translations.en;
-
+  
   // Camera permissions
   const [permission, requestPermission] = useCameraPermissions();
-
-  // Sort queue strictly by priority
+  
+  // Sort queue by priority
   const priorityMap = { emergency: 1, disabled: 2, common: 3 };
+  
+  const currentStaffDept = appState.staffInfo?.department || 'General Medicine';
+  const matchedDept = (appState.departments || []).find(d => d.name === currentStaffDept);
+  const staffDeptId = matchedDept ? matchedDept.id : 'gen_med';
 
   // All active tokens
-  const allActiveTokens = (appState.tokens || []).filter(t => t.status === "active" || t.status === "waiting").sort((a, b) => {
-    const isAEmergency = a.type?.toLowerCase() === 'emergency' || a.primaryDepartment?.toLowerCase() === 'emergency';
-    const isBEmergency = b.type?.toLowerCase() === 'emergency' || b.primaryDepartment?.toLowerCase() === 'emergency';
-
-    // Ultimate first priority for Emergency
-    if (isAEmergency && !isBEmergency) return -1;
-    if (!isAEmergency && isBEmergency) return 1;
-
-    // Below them, sort by standard priority map or generation time
+  const allActiveTokens = (appState.tokens || []).filter(t => {
+    // Find active visit for this department
+    const v = (t.visits || []).find(visit => visit.department_id === staffDeptId && (visit.status === 'waiting' || visit.status === 'called' || visit.status === 'in_consultation'));
+    return v !== undefined;
+  }).sort((a, b) => {
     const pA = priorityMap[a.type] || 3;
     const pB = priorityMap[b.type] || 3;
     if (pA !== pB) return pA - pB;
-
     return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
   });
 
   const [activePatient, setActivePatient] = useState(allActiveTokens.length > 0 ? allActiveTokens[0] : null);
-
-  // Upcoming queue is all other patients (Fully viewable instead of just 3)
-  const upcomingQueue = allActiveTokens.filter(t => t.id !== activePatient?.id);
+  
+  // Upcoming queue is the next 3 patients excluding active
+  const upcomingQueue = allActiveTokens.filter(t => t.id !== activePatient?.id).slice(0, 3);
   const totalWaiting = allActiveTokens.length;
-
-  // Top-level tab: 'queue' (existing) | 'live' (new Live Queue Display) | 'records'
-  const [activeTab, setActiveTab] = useState('queue');
-
-  // Last-updated timestamp for Live Queue Display
-  const [lastUpdated, setLastUpdated] = useState(new Date());
-
-  // Patient Records states
-  const [dbRecords, setDbRecords] = useState([]);
-  const [loadingRecords, setLoadingRecords] = useState(false);
-  const [recordsDateFilter, setRecordsDateFilter] = useState('today'); // 'today' | 'yesterday' | 'week' | 'custom'
-  const [recordsCustomDate, setRecordsCustomDate] = useState(new Date().toISOString().split('T')[0]); // YYYY-MM-DD
-  const [recordsSearchQuery, setRecordsSearchQuery] = useState("");
-  const [recordsSelectedDept, setRecordsSelectedDept] = useState("all");
-  const [recordsSelectedDoctor, setRecordsSelectedDoctor] = useState("all");
-  const [recordsPaginationPage, setRecordsPaginationPage] = useState(1);
 
   // Track prescription mode
   const [prescriptionMode, setPrescriptionMode] = useState(null); // 'template', 'upload', 'scan'
@@ -109,6 +91,26 @@ export function StaffDashboard() {
   const [diagnosis, setDiagnosis] = useState("");
   const [medicines, setMedicines] = useState([]);
   const [advice, setAdvice] = useState("");
+  const [referralDeptId, setReferralDeptId] = useState("");
+
+  // Receptionist States
+  const [searchPhone, setSearchPhone] = useState("");
+  const [receptionPatient, setReceptionPatient] = useState({
+    name: "",
+    phone: "",
+    age: "",
+    gender: "unspecified",
+    type: "common",
+    primaryDepartment: "General Medicine",
+    assignedDoctor: ""
+  });
+  const [generatedKioskToken, setGeneratedKioskToken] = useState(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [receptionLoading, setReceptionLoading] = useState(false);
+  const receptionBookingInProgress = useRef(false);
+
+  // Processing state for action button protection
+  const [isProcessing, setIsProcessing] = useState(false);
 
   // QR Scanner State
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -122,90 +124,6 @@ export function StaffDashboard() {
       setActivePatient(allActiveTokens[0]);
     }
   }, [allActiveTokens]);
-
-  // Tick the "last updated" clock for Live Queue Display
-  useEffect(() => {
-    const tick = setInterval(() => setLastUpdated(new Date()), 30000);
-    return () => clearInterval(tick);
-  }, []);
-
-  // Fetch patient records when Patient Records tab is opened
-  const fetchRecords = async () => {
-    setLoadingRecords(true);
-    try {
-      const { data, error } = await supabase
-        .from('queue')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (!error && data) {
-        setDbRecords(data);
-      }
-    } catch (err) {
-      console.error("Error fetching patient records:", err);
-    } finally {
-      setLoadingRecords(false);
-    }
-  };
-
-  useEffect(() => {
-    if (activeTab === 'records') {
-      fetchRecords();
-    }
-  }, [activeTab]);
-
-  const getDoctorName = (doctorId, deptName) => {
-    if (!doctorId) return "Any Available";
-    const dept = appState.departments?.find(d => d.name === deptName);
-    if (dept) {
-      const doc = dept.doctors?.find(d => d.id === doctorId);
-      if (doc) return doc.name;
-    }
-    return doctorId; // fallback
-  };
-
-  // Supabase Real-Time Sync for Token Queue
-  useEffect(() => {
-    const channel = supabase.channel('public:queue_sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, (payload) => {
-        if (payload.eventType === 'INSERT') {
-          const newRow = payload.new;
-          const mappedToken = {
-            id: newRow.token_id,
-            type: newRow.token_id && newRow.token_id.startsWith('EME') ? 'emergency' : newRow.token_id && newRow.token_id.startsWith('ACE') ? 'disabled' : 'common',
-            primaryDepartment: newRow.department,
-            timestamp: newRow.created_at ? new Date(newRow.created_at) : new Date(),
-            patient: {
-              name: newRow.patient_name || 'Walk-in Patient',
-            },
-            status: newRow.status || 'active',
-            qrCode: newRow.token_id
-          };
-
-          setAppState(prev => {
-            const exists = prev.tokens.find(t => t.id === mappedToken.id);
-            if (exists) return prev;
-            return { ...prev, tokens: [...prev.tokens, mappedToken] };
-          });
-        }
-        else if (payload.eventType === 'UPDATE') {
-          setAppState(prev => ({
-            ...prev,
-            tokens: prev.tokens.map(t => t.id === payload.new.token_id ? { ...t, status: payload.new.status } : t)
-          }));
-        }
-        else if (payload.eventType === 'DELETE') {
-          setAppState(prev => ({
-            ...prev,
-            tokens: prev.tokens.filter(t => t.id !== payload.old.token_id)
-          }));
-        }
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
 
   const handleBack = () => {
     setAppState((prev) => ({ ...prev, currentView: "portal" }));
@@ -234,7 +152,7 @@ export function StaffDashboard() {
     setMedicines(updated);
   };
 
-  const handleSavePrescription = async () => {
+  const handleSavePrescription = () => {
     if (!activePatient) return;
 
     const prescription = {
@@ -247,27 +165,7 @@ export function StaffDashboard() {
     };
 
     addPrescriptionToToken(activePatient.id, prescription);
-
-    // Save to Supabase to trigger realtime sync
-    try {
-      const { error } = await supabase.from('prescriptions').insert({
-        token_id: activePatient.id,
-        patient_id: activePatient.patient?.phone || activePatient.patient?.email || "unknown",
-        doctor_id: appState.staffInfo?.id || 'staff',
-        department: activePatient.primaryDepartment,
-        diagnosis,
-        medicines,
-        advice,
-        mode: prescriptionMode
-      });
-      if (error) {
-        console.error("Supabase insert error:", error);
-        toast.error("Sync partial", { description: "Saved locally but failed to push to server." });
-      }
-    } catch (err) {
-      console.error("Error saving prescription to Supabase:", err);
-    }
-
+    
     toast.success("Prescription Saved", {
       description: "Available in patient records.",
     });
@@ -279,36 +177,463 @@ export function StaffDashboard() {
     setAdvice("");
   };
 
-  const handleMarkComplete = async () => {
-    if (!activePatient) return;
+  // Receptionist Handlers
+  const handleSearchPatient = async () => {
+    if (!searchPhone.trim()) {
+      toast.error("Please enter a phone number to search");
+      return;
+    }
+    setIsSearching(true);
+    try {
+      const { data, error } = await supabase
+        .from('queue')
+        .select('*')
+        .eq('patient_phone', searchPhone)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        const match = data[0];
+        setReceptionPatient(prev => ({
+          ...prev,
+          name: match.patient_name || "",
+          phone: match.patient_phone || searchPhone,
+          age: match.patient_age ? String(match.patient_age) : "",
+          gender: match.patient_gender || "unspecified"
+        }));
+        toast.success("Patient found!", { description: `Loaded details for ${match.patient_name}.` });
+      } else {
+        toast.error("No record found. Please enter details manually.");
+        setReceptionPatient(prev => ({
+          ...prev,
+          phone: searchPhone,
+          name: "",
+          age: "",
+          gender: "unspecified"
+        }));
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Search failed");
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleReceptionGenerateToken = async () => {
+    if (receptionBookingInProgress.current || receptionLoading) return;
+    if (!receptionPatient.name.trim()) {
+      toast.error("Patient Name is required");
+      return;
+    }
+    if (!receptionPatient.phone.trim()) {
+      toast.error("Phone Number is required");
+      return;
+    }
+
+    receptionBookingInProgress.current = true;
+    setReceptionLoading(true);
+    const now = new Date();
+    const scheduledTime = now;
+    
+    // Calculate incremental token number locally
+    const typeTokens = appState.tokens.filter(t => t.type === receptionPatient.type);
+    const tokenNumber = String(typeTokens.length + 1).padStart(3, '0');
+    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+    const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '');
+    
+    const prefix = receptionPatient.type === 'emergency' ? 'EME' : receptionPatient.type === 'disabled' ? 'ACE' : 'GEN';
+    const tokenId = `${prefix}-${timeStr}-${tokenNumber}`;
+    const patientId = `PAT-ASSISTED-${dateStr}-${tokenNumber}`;
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const deptObj = (appState.departments || []).find(d => d.name === receptionPatient.primaryDepartment) || { id: 'gen_med', name: 'General Medicine' };
+    const position = appState.tokens.filter(t => t.primaryDepartment === deptObj.name && t.status === 'waiting').length + 1;
+    const waitTime = position * (deptObj.average_wait_time || 15);
+
+    const newToken = {
+        id: tokenId,
+        type: receptionPatient.type,
+        primaryDepartment: deptObj.name,
+        timestamp: now,
+        scheduledTime: scheduledTime,
+        patient: {
+            name: receptionPatient.name,
+            email: '',
+            phone: receptionPatient.phone,
+            age: parseInt(receptionPatient.age || '0'),
+            gender: receptionPatient.gender,
+            patientId: patientId
+        },
+        status: 'waiting',
+        priority: receptionPatient.type === 'emergency' ? 1 : receptionPatient.type === 'disabled' ? 2 : 3,
+        qrCode: tokenId,
+        validUntil: endOfDay,
+        createdAt: now,
+        estimatedWaitTime: waitTime,
+        positionInQueue: position,
+        booking_type: 'assisted',
+        visits: [],
+        prescriptions: [],
+        labTests: [],
+        departmentAccess: [deptObj.name]
+    };
 
     try {
-      // Update Supabase queue table
+        // Save to database
+        const { error } = await supabase.from('queue').insert([{
+            token_id: tokenId,
+            patient_name: newToken.patient.name,
+            department: newToken.primaryDepartment,
+            status: 'waiting',
+            booking_type: 'assisted',
+            patient_phone: receptionPatient.phone,
+            patient_age: parseInt(receptionPatient.age || '0'),
+            patient_gender: receptionPatient.gender,
+            doctor_id: (receptionPatient.assignedDoctor && receptionPatient.assignedDoctor !== 'any') ? receptionPatient.assignedDoctor : null,
+            token_data: newToken
+        }]);
+
+        if (error) throw error;
+
+        // Insert into queue_visits relation
+        const { error: visitError } = await supabase.from('queue_visits').insert([{
+            token_id: tokenId,
+            department_id: deptObj.id,
+            doctor_id: (receptionPatient.assignedDoctor && receptionPatient.assignedDoctor !== 'any') ? receptionPatient.assignedDoctor : null,
+            status: 'waiting',
+            sequence_order: 1
+        }]);
+
+        if (visitError) {
+            // Cleanup queue insert to maintain consistency
+            await supabase.from('queue').delete().eq('token_id', tokenId).catch(console.error);
+            throw visitError;
+        }
+
+        // Update app context optimistically
+        setAppState(prev => ({
+            ...prev,
+            tokens: [...prev.tokens, newToken]
+        }));
+
+        setGeneratedKioskToken(newToken);
+        toast.success("Token Generated Successfully!");
+        receptionBookingInProgress.current = false;
+        setReceptionLoading(false);
+    } catch (error) {
+        console.error('Assisted Token Generation Failed:', {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
+            raw: error
+        });
+        toast.error("Unable to generate the token. Please try again.");
+        receptionBookingInProgress.current = false;
+        setReceptionLoading(false);
+    }
+  };
+
+  // Queue Transition Handlers
+  const handleStartConsultation = async () => {
+    if (!activePatient || isProcessing) return;
+    setIsProcessing(true);
+
+    try {
+      const activeVisit = (activePatient.visits || []).find(v => v.department_id === staffDeptId && (v.status === 'waiting' || v.status === 'called'));
+      
+      if (activeVisit) {
+        await supabase
+          .from('queue_visits')
+          .update({ status: 'in_consultation' })
+          .eq('id', activeVisit.id);
+      }
+
+      const updatedTokenProps = { ...activePatient, status: "in_consultation" };
       await supabase
         .from('queue')
-        .update({ status: 'completed' })
+        .update({ status: 'in_consultation', token_data: updatedTokenProps })
         .eq('token_id', activePatient.id);
 
-      // Optimistic update
       const updatedTokens = appState.tokens.map((token) =>
-        token.id === activePatient.id ? { ...token, status: "completed" } : token
+        token.id === activePatient.id ? updatedTokenProps : token
       );
-
       setAppState((prev) => ({ ...prev, tokens: updatedTokens }));
-      toast.success("Consultation Completed", {
-        description: `${activePatient.patient?.name || "Patient"}'s session is closed.`,
+
+      toast.success("Consultation Started", {
+        description: `Consultation started with ${activePatient.patient?.name || "Patient"}.`,
       });
+    } catch (error) {
+      console.error("Start consultation failed:", error);
+      toast.error("Error", { description: "Something went wrong. Please try again." });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
-      setPrescriptionMode(null);
+  const handleSkipPatient = async () => {
+    if (!activePatient || isProcessing) return;
+    setIsProcessing(true);
 
-      // Refresh patient records list
-      fetchRecords().catch(console.error);
+    try {
+      const activeVisit = (activePatient.visits || []).find(v => v.department_id === staffDeptId && (v.status === 'waiting' || v.status === 'called' || v.status === 'in_consultation'));
+      
+      if (activeVisit) {
+        await supabase
+          .from('queue_visits')
+          .update({ status: 'skipped' })
+          .eq('id', activeVisit.id);
+      }
+
+      const updatedTokenProps = { ...activePatient, status: "skipped" };
+      await supabase
+        .from('queue')
+        .update({ status: 'skipped', token_data: updatedTokenProps })
+        .eq('token_id', activePatient.id);
+
+      const updatedTokens = appState.tokens.map((token) =>
+        token.id === activePatient.id ? updatedTokenProps : token
+      );
+      setAppState((prev) => ({ ...prev, tokens: updatedTokens }));
+
+      toast.success("Patient Skipped", {
+        description: `${activePatient.patient?.name || "Patient"} has been skipped.`,
+      });
 
       // Find next patient
       const remainingTokens = allActiveTokens.filter(t => t.id !== activePatient.id);
       setActivePatient(remainingTokens.length > 0 ? remainingTokens[0] : null);
     } catch (error) {
-      toast.error("Error", { description: "Failed to mark patient as completed." });
+      console.error("Skip patient failed:", error);
+      toast.error("Error", { description: "Something went wrong. Please try again." });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleCancelToken = async () => {
+    if (!activePatient || isProcessing) return;
+    setIsProcessing(true);
+
+    try {
+      const activeVisit = (activePatient.visits || []).find(v => v.department_id === staffDeptId && (v.status === 'waiting' || v.status === 'called' || v.status === 'in_consultation'));
+      
+      if (activeVisit) {
+        await supabase
+          .from('queue_visits')
+          .update({ status: 'cancelled' })
+          .eq('id', activeVisit.id);
+      }
+
+      const updatedTokenProps = { ...activePatient, status: "cancelled" };
+      await supabase
+        .from('queue')
+        .update({ status: 'cancelled', token_data: updatedTokenProps })
+        .eq('token_id', activePatient.id);
+
+      const updatedTokens = appState.tokens.map((token) =>
+        token.id === activePatient.id ? updatedTokenProps : token
+      );
+      setAppState((prev) => ({ ...prev, tokens: updatedTokens }));
+
+      toast.success("Token Cancelled", {
+        description: `Token ${activePatient.id} has been cancelled.`,
+      });
+
+      // Find next patient
+      const remainingTokens = allActiveTokens.filter(t => t.id !== activePatient.id);
+      setActivePatient(remainingTokens.length > 0 ? remainingTokens[0] : null);
+    } catch (error) {
+      console.error("Cancel token failed:", error);
+      toast.error("Error", { description: "Something went wrong. Please try again." });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleCallPatient = async () => {
+    if (!activePatient || isProcessing) return;
+    setIsProcessing(true);
+    
+    const roomCounter = appState.staffInfo?.room_counter || 'Room 101';
+
+    try {
+      // 1. Find active visit in queue_visits for this doctor's clinic
+      const activeVisit = (activePatient.visits || []).find(v => v.department_id === staffDeptId && (v.status === 'waiting' || v.status === 'called'));
+      
+      if (activeVisit) {
+        // Update visit status and room counter
+        await supabase
+          .from('queue_visits')
+          .update({ 
+            status: 'called', 
+            called_at: new Date().toISOString(),
+            room_counter: roomCounter 
+          })
+          .eq('id', activeVisit.id);
+      }
+
+      // Update main queue token status and room counter
+      const updatedTokenProps = { ...activePatient, status: "called", room_counter: roomCounter };
+      await supabase
+        .from('queue')
+        .update({ 
+            status: 'called', 
+            room_counter: roomCounter,
+            token_data: updatedTokenProps 
+        })
+        .eq('token_id', activePatient.id);
+
+      // 2. Local State update
+      const updatedTokens = appState.tokens.map((token) =>
+        token.id === activePatient.id ? updatedTokenProps : token
+      );
+      setAppState((prev) => ({ ...prev, tokens: updatedTokens }));
+
+      toast.success("Called Patient", {
+        description: `${activePatient.patient?.name || "Patient"} requested at ${roomCounter}.`,
+      });
+
+      // 3. TTS Announcement
+      const language = appState.language || 'en';
+      const tokenIdClean = activePatient.id.split('-').pop() || activePatient.id;
+      
+      let text = `Token number ${tokenIdClean}, please proceed to ${roomCounter}`;
+      if (language === 'hi') {
+          text = `टोकेन नंबर ${tokenIdClean}, कृपया ${roomCounter} पर जाएं`;
+      } else if (language === 'te') {
+          text = `టోకెన్ నంబర్ ${tokenIdClean}, దయచేసి ${roomCounter} కి వెళ్ళండి`;
+      }
+      
+      if (Platform.OS === 'web') {
+          if ('speechSynthesis' in window) {
+              window.speechSynthesis.cancel();
+              const utterance = new SpeechSynthesisUtterance(text);
+              utterance.lang = language === 'hi' ? 'hi-IN' : language === 'te' ? 'te-IN' : 'en-US';
+              window.speechSynthesis.speak(utterance);
+          }
+      } else {
+          try {
+              const Speech = require('expo-speech');
+              Speech.stop();
+              Speech.speak(text, { 
+                  language: language === 'hi' ? 'hi-IN' : language === 'te' ? 'te-IN' : 'en-US' 
+              });
+          } catch (speechErr) {
+              console.error("Native TTS call failed:", speechErr);
+          }
+      }
+    } catch (error) {
+      console.error("Call handling failed:", error);
+      toast.error("Error", { description: "Something went wrong. Please try again." });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleMarkComplete = async () => {
+    if (!activePatient || isProcessing) return;
+    setIsProcessing(true);
+
+    try {
+      // 1. Find active visit in queue_visits for this doctor's clinic
+      const activeVisit = (activePatient.visits || []).find(v => v.department_id === staffDeptId && (v.status === 'waiting' || v.status === 'called'));
+      
+      if (activeVisit) {
+        // Mark current visit as completed
+        await supabase
+          .from('queue_visits')
+          .update({ 
+            status: 'completed', 
+            completed_at: new Date().toISOString() 
+          })
+          .eq('id', activeVisit.id);
+      }
+
+      let updatedTokenProps = { ...activePatient };
+
+      if (referralDeptId) {
+        // 2. We are referring the patient!
+        const targetDept = (appState.departments || []).find(d => d.id === referralDeptId);
+        const targetDeptName = targetDept ? targetDept.name : 'Referred Department';
+        
+        // Find next sequence order
+        const maxSeq = (activePatient.visits || []).reduce((max, v) => Math.max(max, v.sequence_order || 0), 0);
+        const nextSeq = maxSeq + 1;
+
+        // Check if duplicate visit exists
+        const hasActiveReferredVisit = (activePatient.visits || []).some(v => v.department_id === referralDeptId && (v.status === 'waiting' || v.status === 'called'));
+
+        if (!hasActiveReferredVisit) {
+          await supabase
+            .from('queue_visits')
+            .insert([{
+              token_id: activePatient.id,
+              department_id: referralDeptId,
+              doctor_id: null,
+              status: 'waiting',
+              sequence_order: nextSeq
+            }]);
+        }
+
+        updatedTokenProps.status = "waiting";
+        updatedTokenProps.room_counter = null;
+        updatedTokenProps.doctor_id = null;
+
+        await supabase
+          .from('queue')
+          .update({ 
+            status: 'waiting', 
+            room_counter: null,
+            doctor_id: null,
+            token_data: updatedTokenProps 
+          })
+          .eq('token_id', activePatient.id);
+
+        toast.success("Patient Referred", {
+          description: `Successfully referred to ${targetDeptName}.`,
+        });
+      } else {
+        // 3. Simple completion
+        updatedTokenProps.status = "completed";
+        
+        await supabase
+          .from('queue')
+          .update({ 
+            status: 'completed', 
+            token_data: updatedTokenProps 
+          })
+          .eq('token_id', activePatient.id);
+
+        toast.success("Consultation Completed", {
+          description: `${activePatient.patient?.name || "Patient"}'s session is closed.`,
+        });
+      }
+
+      const updatedTokens = appState.tokens.map((token) =>
+        token.id === activePatient.id ? updatedTokenProps : token
+      );
+      setAppState((prev) => ({ ...prev, tokens: updatedTokens }));
+
+      // Reset states
+      setPrescriptionMode(null);
+      setReferralDeptId("");
+      setDiagnosis("");
+      setMedicines([]);
+      setAdvice("");
+      
+      // Find next patient
+      const remainingTokens = allActiveTokens.filter(t => t.id !== activePatient.id);
+      setActivePatient(remainingTokens.length > 0 ? remainingTokens[0] : null);
+    } catch (error) {
+      console.error("Complete handling failed:", error);
+      toast.error("Error", { description: "Something went wrong. Please try again." });
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -333,7 +658,7 @@ export function StaffDashboard() {
     scanLockRef.current = false;
   };
 
-  const handleBarCodeScanned = async ({ data }) => {
+  const handleBarCodeScanned = ({ data }) => {
     // Prevent multiple rapid scans
     if (scanLockRef.current) return;
     scanLockRef.current = true;
@@ -354,41 +679,32 @@ export function StaffDashboard() {
       return;
     }
 
-    try {
-      // Update Supabase queue table
-      await supabase
-        .from('queue')
-        .update({ status: 'completed' })
-        .eq('token_id', matchedToken.id);
+    // Mark token as completed
+    const updatedTokenProps = { ...matchedToken, status: "completed" };
+    const updatedTokens = appState.tokens.map((token) =>
+      token.id === matchedToken.id ? updatedTokenProps : token
+    );
+    
+    // Do not await, fire and forget for snappy UI
+    supabase.from('queue').update({ status: 'completed', token_data: updatedTokenProps }).eq('token_id', matchedToken.id).catch(console.error);
 
-      // Optimistic upate
-      const updatedTokens = appState.tokens.map((token) =>
-        token.id === matchedToken.id ? { ...token, status: "completed" } : token
-      );
-      setAppState((prev) => ({ ...prev, tokens: updatedTokens }));
+    setAppState((prev) => ({ ...prev, tokens: updatedTokens }));
 
-      // Set the scanned patient for display
-      setLastScannedPatient(matchedToken);
+    // Set the scanned patient for display
+    setLastScannedPatient(matchedToken);
 
-      // Find next patient in queue
-      const remainingTokens = allActiveTokens.filter((tok) => tok.id !== matchedToken.id);
-      const nextInLine = remainingTokens.length > 0 ? remainingTokens[0] : null;
-      setNextPatientAfterScan(nextInLine);
-      setActivePatient(nextInLine);
+    // Find next patient in queue
+    const remainingTokens = allActiveTokens.filter((tok) => tok.id !== matchedToken.id);
+    const nextInLine = remainingTokens.length > 0 ? remainingTokens[0] : null;
+    setNextPatientAfterScan(nextInLine);
+    setActivePatient(nextInLine);
 
-      setPrescriptionMode(null);
-      setScannerOpen(false);
+    setPrescriptionMode(null);
+    setScannerOpen(false);
 
-      // Refresh patient records list
-      fetchRecords().catch(console.error);
-
-      toast.success("✅ Appointment Completed", {
-        description: `${matchedToken.patient?.name || "Patient"}'s appointment has been marked complete.`,
-      });
-    } catch (error) {
-      toast.error("Error", { description: "Failed to mark scanned patient as completed." });
-      scanLockRef.current = false;
-    }
+    toast.success("✅ Appointment Completed", {
+      description: `${matchedToken.patient?.name || "Patient"}'s appointment has been marked complete.`,
+    });
   };
 
   const formatTokenId = (id) => {
@@ -405,47 +721,167 @@ export function StaffDashboard() {
     return { bg: "#f0f9ff", text: "#0ea5e9", border: "#bae6fd", name: "General" };
   };
 
-  // ─── Live Queue Display helpers ───────────────────────────────────────────
+  const isReceptionist = appState.staffInfo?.department === 'Receptionist' || appState.staffInfo?.role === 'receptionist';
 
-  // Returns a colour accent for a department type
-  const getDeptAccent = (type) => {
-    if (type === "diagnostic") return "#f59e0b";
-    if (type === "pharmacy") return "#8b5cf6";
-    if (type === "administrative") return "#64748b";
-    return "#2563eb"; // consultation / default
-  };
+  if (isReceptionist) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <View style={styles.headerTop}>
+            <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+              <ArrowLeft size={24} color="#1e293b" />
+            </TouchableOpacity>
+            <View style={styles.headerInfo}>
+              <Text style={styles.dashboardTitle}>Assisted Registration</Text>
+              <Text style={styles.doctorName}>Reception / Helpdesk Desk</Text>
+            </View>
+          </View>
+        </View>
 
-  // Build a map: deptName -> { tokens[], dept }
-  const buildLiveQueueMap = () => {
-    const map = {};
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          {generatedKioskToken ? (
+            <Card style={{ padding: 24, borderRadius: 16, backgroundColor: '#f0fdf4', borderColor: '#bbf7d0', borderWidth: 2, alignItems: 'center' }}>
+              <CheckCircle2 size={64} color="#16a34a" style={{ marginBottom: 16 }} />
+              <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#16a34a', marginBottom: 8 }}>TOKEN GENERATED</Text>
+              
+              <View style={{ backgroundColor: '#fff', padding: 20, borderRadius: 12, width: '100%', alignItems: 'center', marginVertical: 16, borderWidth: 1, borderColor: '#cbd5e1' }}>
+                <Text style={{ fontSize: 13, color: '#64748b', fontWeight: 'bold' }}>PATIENT NAME</Text>
+                <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#0f172a', marginBottom: 12 }}>{generatedKioskToken.patient.name}</Text>
+                
+                <Text style={{ fontSize: 13, color: '#64748b', fontWeight: 'bold' }}>TOKEN ID</Text>
+                <Text style={{ fontSize: 36, fontWeight: '900', color: '#2563eb', letterSpacing: 1 }}>{generatedKioskToken.id}</Text>
+                
+                <Text style={{ fontSize: 13, color: '#64748b', fontWeight: 'bold', marginTop: 12 }}>CLINIC / DEPT</Text>
+                <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#0f172a' }}>{generatedKioskToken.primaryDepartment}</Text>
+              </View>
 
-    // Seed from department list
-    (appState.departments || []).forEach((dept) => {
-      map[dept.name] = { dept, tokens: [] };
-    });
+              <TouchableOpacity 
+                style={{ backgroundColor: '#2563eb', paddingVertical: 14, paddingHorizontal: 32, borderRadius: 8, marginTop: 8 }}
+                onPress={() => setGeneratedKioskToken(null)}
+              >
+                <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>Register Next Patient</Text>
+              </TouchableOpacity>
+            </Card>
+          ) : (
+            <View style={{ gap: 16 }}>
+              {/* Search Section */}
+              <Card style={{ padding: 16, borderRadius: 12 }}>
+                <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#1e293b', marginBottom: 8 }}>Search Existing Patient</Text>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <TextInput
+                    style={{ flex: 1, borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, backgroundColor: '#fff', color: '#1e293b' }}
+                    placeholder="Enter phone number"
+                    value={searchPhone}
+                    onChangeText={setSearchPhone}
+                    keyboardType="phone-pad"
+                  />
+                  <TouchableOpacity 
+                    style={{ backgroundColor: '#0ea5e9', justifyContent: 'center', paddingHorizontal: 20, borderRadius: 8 }}
+                    onPress={handleSearchPatient}
+                    disabled={isSearching}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>{isSearching ? "Searching..." : "Search"}</Text>
+                  </TouchableOpacity>
+                </View>
+              </Card>
 
-    // Populate with live tokens
-    allActiveTokens.forEach((tok) => {
-      const key = tok.primaryDepartment;
-      if (!key) return;
-      if (!map[key]) map[key] = { dept: null, tokens: [] };
-      map[key].tokens.push(tok);
-    });
+              {/* Patient Form Section */}
+              <Card style={{ padding: 16, borderRadius: 12, gap: 12 }}>
+                <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#1e293b', marginBottom: 4 }}>Basic Patient Details</Text>
+                
+                <View>
+                  <Text style={styles.formLabel}>Full Name</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    placeholder="Enter patient full name"
+                    value={receptionPatient.name}
+                    onChangeText={(val) => setReceptionPatient(p => ({ ...p, name: val }))}
+                  />
+                </View>
 
-    // Keep only departments that have active tokens OR a non-zero queue
-    return Object.entries(map).filter(([, val]) => {
-      const hasLiveTokens = val.tokens.length > 0;
-      const hasStaticQueue = val.dept && val.dept.currentQueue > 0;
-      return hasLiveTokens || hasStaticQueue;
-    });
-  };
+                <View>
+                  <Text style={styles.formLabel}>Phone Number</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    placeholder="Enter phone number"
+                    value={receptionPatient.phone}
+                    onChangeText={(val) => setReceptionPatient(p => ({ ...p, phone: val }))}
+                    keyboardType="phone-pad"
+                  />
+                </View>
 
-  const formatTime = (date) => {
-    const h = date.getHours().toString().padStart(2, "0");
-    const m = date.getMinutes().toString().padStart(2, "0");
-    return `${h}:${m}`;
-  };
-  // ─────────────────────────────────────────────────────────────────────────
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.formLabel}>Age (Yrs)</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      placeholder="Age"
+                      value={receptionPatient.age}
+                      onChangeText={(val) => setReceptionPatient(p => ({ ...p, age: val }))}
+                      keyboardType="numeric"
+                    />
+                  </View>
+
+                  <View style={{ flex: 1.5 }}>
+                    <Text style={styles.formLabel}>Gender</Text>
+                    <Select value={receptionPatient.gender} onValueChange={(val) => setReceptionPatient(p => ({ ...p, gender: val }))}>
+                      <SelectTrigger style={{ height: 44, borderColor: '#cbd5e1', borderWidth: 1, borderRadius: 8, paddingHorizontal: 12 }}>
+                        <SelectValue placeholder="Gender" />
+                      </SelectTrigger>
+                      <SelectContent style={{ backgroundColor: '#fff' }}>
+                        <SelectItem value="male">Male</SelectItem>
+                        <SelectItem value="female">Female</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                        <SelectItem value="unspecified">Unspecified</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </View>
+                </View>
+
+                <View>
+                  <Text style={styles.formLabel}>Service Type / Category</Text>
+                  <Select value={receptionPatient.type} onValueChange={(val) => setReceptionPatient(p => ({ ...p, type: val }))}>
+                    <SelectTrigger style={{ height: 44, borderColor: '#cbd5e1', borderWidth: 1, borderRadius: 8, paddingHorizontal: 12 }}>
+                      <SelectValue placeholder="Category" />
+                    </SelectTrigger>
+                    <SelectContent style={{ backgroundColor: '#fff' }}>
+                      <SelectItem value="common">General Booking</SelectItem>
+                      <SelectItem value="emergency">Emergency Booking</SelectItem>
+                      <SelectItem value="disabled">Accessibility Booking</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </View>
+
+                <View>
+                  <Text style={styles.formLabel}>Clinic / Department</Text>
+                  <Select value={receptionPatient.primaryDepartment} onValueChange={(val) => setReceptionPatient(p => ({ ...p, primaryDepartment: val }))}>
+                    <SelectTrigger style={{ height: 44, borderColor: '#cbd5e1', borderWidth: 1, borderRadius: 8, paddingHorizontal: 12 }}>
+                      <SelectValue placeholder="Select Clinic" />
+                    </SelectTrigger>
+                    <SelectContent style={{ backgroundColor: '#fff' }}>
+                      {(appState.departments || []).map(d => (
+                        <SelectItem key={d.id} value={d.name}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </View>
+
+                <TouchableOpacity 
+                  style={{ backgroundColor: '#16a34a', paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 12 }}
+                  onPress={handleReceptionGenerateToken}
+                  disabled={receptionLoading}
+                >
+                  <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>
+                    {receptionLoading ? "Generating Token..." : "Generate Token & Print"}
+                  </Text>
+                </TouchableOpacity>
+              </Card>
+            </View>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -473,930 +909,396 @@ export function StaffDashboard() {
             Patients Waiting: <Text style={{ fontWeight: "700" }}>{totalWaiting}</Text>
           </Text>
         </View>
-
-        {/* ── Tab Navigation Bar ── */}
-        <View style={styles.mainTabBar}>
-          <TouchableOpacity
-            style={[styles.mainTabBtn, activeTab === 'queue' && styles.mainTabBtnActive]}
-            onPress={() => setActiveTab('queue')}
-          >
-            <Activity size={16} color={activeTab === 'queue' ? '#2563eb' : '#64748b'} />
-            <Text style={[styles.mainTabText, activeTab === 'queue' && styles.mainTabTextActive]}>
-              Queue Management
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.mainTabBtn, activeTab === 'live' && styles.mainTabBtnActive]}
-            onPress={() => setActiveTab('live')}
-          >
-            <Monitor size={16} color={activeTab === 'live' ? '#2563eb' : '#64748b'} />
-            <Text style={[styles.mainTabText, activeTab === 'live' && styles.mainTabTextActive]}>
-              Live Queue
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.mainTabBtn, activeTab === 'records' && styles.mainTabBtnActive]}
-            onPress={() => setActiveTab('records')}
-          >
-            <FileText size={16} color={activeTab === 'records' ? '#2563eb' : '#64748b'} />
-            <Text style={[styles.mainTabText, activeTab === 'records' && styles.mainTabTextActive]}>
-              Patient Records
-            </Text>
-          </TouchableOpacity>
-        </View>
       </View>
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          LIVE QUEUE DISPLAY TAB
-      ══════════════════════════════════════════════════════════════════════ */}
-      {activeTab === 'live' && (() => {
-        const liveRows = buildLiveQueueMap();
-        return (
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-            {/* Header row */}
-            <View style={styles.liveHeaderRow}>
-              <View>
-                <Text style={styles.liveTitle}>Live Queue Display</Text>
-                <Text style={styles.liveSubtitle}>{liveRows.length} department{liveRows.length !== 1 ? 's' : ''} active</Text>
-              </View>
-              <View style={styles.liveUpdatedBadge}>
-                <Text style={styles.liveUpdatedText}>Updated {formatTime(lastUpdated)}</Text>
-              </View>
-            </View>
-
-            {liveRows.length === 0 ? (
-              <View style={styles.liveEmptyState}>
-                <Monitor size={52} color="#cbd5e1" />
-                <Text style={styles.liveEmptyTitle}>No Active Queues</Text>
-                <Text style={styles.liveEmptySub}>All departments are currently idle.</Text>
-              </View>
-            ) : (
-              liveRows.map(([deptName, val]) => {
-                const { dept, tokens: dTokens } = val;
-                const accent = getDeptAccent(dept?.type);
-
-                // Sort tokens by priority then timestamp
-                const sorted = [...dTokens].sort((a, b) => {
-                  const pA = priorityMap[a.type] || 3;
-                  const pB = priorityMap[b.type] || 3;
-                  if (pA !== pB) return pA - pB;
-                  return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-                });
-
-                const nowServingToken = sorted[0];
-                const nextToken = sorted[1];
-
-                // Counter label from first available doctor or static fallback
-                const availDoc = dept?.doctors?.find(d => d.status === 'available');
-                const counterLabel = availDoc
-                  ? `Counter ${dept.doctors.indexOf(availDoc) + 1}`.padEnd(2)
-                  : 'Counter 01';
-
-                const isActive = dTokens.length > 0 || (dept?.currentQueue ?? 0) > 0;
-
-                return (
-                  <View key={deptName} style={styles.liveCard}>
-                    {/* Coloured left accent bar */}
-                    <View style={[styles.liveAccentBar, { backgroundColor: accent }]} />
-
-                    <View style={styles.liveCardBody}>
-                      {/* Department name */}
-                      <Text style={styles.liveDeptName} numberOfLines={1}>{deptName}</Text>
-
-                      {/* Serving / Next row */}
-                      <View style={styles.liveInfoRow}>
-                        <View style={styles.liveInfoCell}>
-                          <Text style={styles.liveInfoLabel}>Now Serving</Text>
-                          <Text style={[styles.liveInfoValue, { color: accent }]}>
-                            {nowServingToken ? formatTokenId(nowServingToken.id) : '---'}
-                          </Text>
-                        </View>
-
-                        <View style={styles.liveDivider} />
-
-                        <View style={styles.liveInfoCell}>
-                          <Text style={styles.liveInfoLabel}>Next</Text>
-                          <Text style={styles.liveInfoValue}>
-                            {nextToken ? formatTokenId(nextToken.id) : '---'}
-                          </Text>
-                        </View>
-
-                        <View style={styles.liveDivider} />
-
-                        <View style={styles.liveInfoCell}>
-                          <Text style={styles.liveInfoLabel}>Counter</Text>
-                          <Text style={styles.liveInfoValue}>{counterLabel}</Text>
-                        </View>
-
-                        <View style={styles.liveDivider} />
-
-                        {/* Status badge */}
-                        <View style={[styles.liveStatusBadge, isActive ? styles.liveStatusActive : styles.liveStatusPaused]}>
-                          <Text style={styles.liveStatusDot}>{isActive ? '🟢' : '🟡'}</Text>
-                          <Text style={[styles.liveStatusText, { color: isActive ? '#16a34a' : '#d97706' }]}>
-                            {isActive ? 'Active' : 'Paused'}
-                          </Text>
-                        </View>
-                      </View>
-
-                      {/* Queue count footer */}
-                      <Text style={styles.liveQueueCount}>
-                        {dTokens.length > 0
-                          ? `${dTokens.length} patient${dTokens.length !== 1 ? 's' : ''} in queue`
-                          : `${dept?.currentQueue ?? 0} in queue`}
-                      </Text>
-                    </View>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* 2. ACTIVE PATIENT CARD */}
+        {activePatient ? (
+          <View style={styles.activePatientContainer}>
+            <Text style={styles.sectionTitle}>Current Patient</Text>
+            <Card style={styles.activeCard}>
+              <View style={styles.activeCardContent}>
+                <View style={styles.mainTokenArea}>
+                  <Text style={styles.tokenLabel}>TOKEN</Text>
+                  <Text style={styles.largeToken}>{formatTokenId(activePatient.id)}</Text>
+                  <View style={[styles.priorityBadge, { backgroundColor: getPriorityColors(activePatient.type).bg }]}>
+                    <Text style={[styles.priorityText, { color: getPriorityColors(activePatient.type).text }]}>
+                      {getPriorityColors(activePatient.type).name}
+                    </Text>
                   </View>
-                );
-              })
-            )}
-          </ScrollView>
-        );
-      })()}
-
-      {/* ══════════════════════════════════════════════════════════════════════
-          PATIENT RECORDS TAB
-      ══════════════════════════════════════════════════════════════════════ */}
-      {activeTab === 'records' && (() => {
-        // Date match checker
-        const matchesDateFilter = (createdAtStr) => {
-          const itemDate = new Date(createdAtStr);
-          const now = new Date();
-
-          if (recordsDateFilter === 'today') {
-            return itemDate.toDateString() === now.toDateString();
-          }
-          if (recordsDateFilter === 'yesterday') {
-            const yesterday = new Date();
-            yesterday.setDate(now.getDate() - 1);
-            return itemDate.toDateString() === yesterday.toDateString();
-          }
-          if (recordsDateFilter === 'week') {
-            const diffTime = Math.abs(now - itemDate);
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            return diffDays <= 7;
-          }
-          if (recordsDateFilter === 'custom') {
-            if (!recordsCustomDate) return true;
-            const [cYear, cMonth, cDay] = recordsCustomDate.split('-').map(Number);
-            const itemYear = itemDate.getFullYear();
-            const itemMonth = itemDate.getMonth() + 1;
-            const itemDay = itemDate.getDate();
-            return itemYear === cYear && itemMonth === cMonth && itemDay === cDay;
-          }
-          return true;
-        };
-
-        // Build combined list of rows (use dbRecords as base, and add/override with local tokens)
-        const mergedRecords = [];
-        dbRecords.forEach(row => {
-          mergedRecords.push({ ...row });
-        });
-
-        (appState.tokens || []).forEach(localToken => {
-          const existingIdx = mergedRecords.findIndex(r => r.token_id === localToken.id);
-          if (existingIdx === -1) {
-            mergedRecords.push({
-              token_id: localToken.id,
-              patient_name: localToken.patient?.name || "Unknown Patient",
-              department: localToken.primaryDepartment,
-              doctor_id: localToken.assignedDoctor || null,
-              status: localToken.status || 'waiting',
-              created_at: localToken.timestamp || new Date()
-            });
-          } else {
-            if (localToken.status) {
-              mergedRecords[existingIdx].status = localToken.status === 'completed' ? 'completed' : localToken.status;
-            }
-          }
-        });
-
-        // Filter records
-        const filteredRows = mergedRecords.filter(row => {
-          if (!matchesDateFilter(row.created_at)) return false;
-          if (recordsSelectedDept !== 'all' && row.department !== recordsSelectedDept) return false;
-          if (recordsSelectedDoctor !== 'all' && row.doctor_id !== recordsSelectedDoctor) return false;
-          if (recordsSearchQuery.trim() !== '') {
-            const query = recordsSearchQuery.toLowerCase();
-            const nameMatch = row.patient_name?.toLowerCase().includes(query);
-            const idMatch = row.token_id?.toLowerCase().includes(query);
-            if (!nameMatch && !idMatch) return false;
-          }
-          return true;
-        }).map(row => {
-          const richToken = appState.tokens.find(t => t.id === row.token_id);
-          const patient = richToken?.patient || {};
-          const seed = row.token_id.charCodeAt(5) || 12;
-          const age = patient.age || (seed % 50 + 20);
-          const gender = patient.gender || (seed % 2 === 0 ? 'male' : 'female');
-          const phone = patient.phone || `+91 98${seed % 10}45 28${(seed * 7) % 10}`;
-
-          const createdDate = new Date(row.created_at);
-          const visitDate = createdDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-          const visitTime = createdDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-
-          return {
-            patientId: patient.patientId || `PAT-${visitDate.replace(/ /g, '')}-${formatTokenId(row.token_id)}`,
-            patientName: row.patient_name || "Unknown Patient",
-            age: age,
-            gender: gender.charAt(0).toUpperCase() + gender.slice(1),
-            phone: phone,
-            department: row.department || "General Consultation",
-            doctor: getDoctorName(row.doctor_id, row.department),
-            tokenNumber: formatTokenId(row.token_id),
-            visitDate: visitDate,
-            visitTime: visitTime,
-            queueStatus: row.status === 'completed' ? 'Served' : 'Waiting',
-            consultationStatus: row.status === 'completed' ? 'Completed' : 'Waiting',
-            rawCreatedAt: createdDate
-          };
-        });
-
-        // Pagination
-        const itemsPerPage = 10;
-        const totalPages = Math.max(1, Math.ceil(filteredRows.length / itemsPerPage));
-        const paginatedRows = filteredRows.slice((recordsPaginationPage - 1) * itemsPerPage, recordsPaginationPage * itemsPerPage);
-
-        // Date selection title
-        const getSelectedDateTitle = () => {
-          let dateStr = "";
-          if (recordsDateFilter === 'today') {
-            dateStr = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
-          } else if (recordsDateFilter === 'yesterday') {
-            const yesterday = new Date();
-            yesterday.setDate(yesterday.getDate() - 1);
-            dateStr = yesterday.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
-          } else if (recordsDateFilter === 'custom' && recordsCustomDate) {
-            const [y, m, d] = recordsCustomDate.split('-').map(Number);
-            const customDateObj = new Date(y, m - 1, d);
-            dateStr = customDateObj.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
-          } else {
-            dateStr = "Selected Period";
-          }
-          return `Patient Records — ${dateStr}`;
-        };
-
-        const handleDownloadExcel = () => {
-          if (filteredRows.length === 0) {
-            toast.error("No Records", { description: "There are no records to download." });
-            return;
-          }
-
-          const worksheetData = filteredRows.map(item => ({
-            "Patient ID": item.patientId,
-            "Patient Name": item.patientName,
-            "Age": item.age,
-            "Gender": item.gender,
-            "Phone Number": item.phone,
-            "Department": item.department,
-            "Doctor": item.doctor,
-            "Token Number": item.tokenNumber,
-            "Visit Date": item.visitDate,
-            "Visit Time": item.visitTime,
-            "Queue Status": item.queueStatus,
-            "Consultation Status": item.consultationStatus
-          }));
-
-          const worksheet = XLSX.utils.json_to_sheet(worksheetData);
-          const workbook = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(workbook, worksheet, "Patient Records");
-
-          let dateSuffix = "";
-          if (recordsDateFilter === 'today') {
-            dateSuffix = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
-          } else if (recordsDateFilter === 'yesterday') {
-            const yesterday = new Date();
-            yesterday.setDate(yesterday.getDate() - 1);
-            dateSuffix = yesterday.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
-          } else if (recordsDateFilter === 'custom' && recordsCustomDate) {
-            const [y, m, d] = recordsCustomDate.split('-').map(Number);
-            const customDateObj = new Date(y, m - 1, d);
-            dateSuffix = customDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
-          } else {
-            dateSuffix = "Period";
-          }
-
-          try {
-            XLSX.writeFile(workbook, `Patient_Records_${dateSuffix}.xlsx`);
-            toast.success("Excel Downloaded", { description: `Successfully exported ${filteredRows.length} patient records.` });
-          } catch (err) {
-            console.error("Error creating excel:", err);
-            toast.error("Download Failed", { description: "Could not generate Excel spreadsheet." });
-          }
-        };
-
-        const getDoctorDropdown = () => {
-          let docs = [];
-          if (recordsSelectedDept === 'all') {
-            appState.departments?.forEach(d => {
-              d.doctors?.forEach(doc => {
-                if (!docs.find(existing => existing.id === doc.id)) {
-                  docs.push({ id: doc.id, name: doc.name });
-                }
-              });
-            });
-          } else {
-            const dept = appState.departments?.find(d => d.name === recordsSelectedDept);
-            dept?.doctors?.forEach(doc => {
-              docs.push({ id: doc.id, name: doc.name });
-            });
-          }
-          return docs;
-        };
-
-        const availableDocs = getDoctorDropdown();
-        const dateQuickOptions = [
-          { key: 'today', label: 'Today' },
-          { key: 'yesterday', label: 'Yesterday' },
-          { key: 'week', label: 'This Week' },
-          { key: 'custom', label: 'Custom Date' }
-        ];
-
-        return (
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-            {/* Header row */}
-            <View style={styles.liveHeaderRow}>
-              <View>
-                <Text style={styles.liveTitle}>{getSelectedDateTitle()}</Text>
-                <Text style={styles.liveSubtitle}>Total Patients Visited: {filteredRows.length}</Text>
+                </View>
+                
+                <View style={styles.patientDetails}>
+                  <Text style={styles.patientName}>{activePatient.patient?.name || "Patient Name"}</Text>
+                  <Text style={styles.patientAge}>
+                    {activePatient.patient?.age || "--"} Yrs • {activePatient.patient?.gender?.charAt(0).toUpperCase() || "U"}
+                  </Text>
+                  <View style={styles.infoRow}>
+                    <Stethoscope size={14} color="#64748b" />
+                    <Text style={styles.infoText}>{activePatient.primaryDepartment || "General Consultation"}</Text>
+                  </View>
+                  <View style={styles.infoRow}>
+                    <Activity size={14} color="#64748b" />
+                    <Text style={styles.infoText} numberOfLines={1}>
+                      Symptoms: {activePatient.patient?.symptoms || "None"}
+                    </Text>
+                  </View>
+                  <View style={styles.verifyContainer}>
+                    <Text style={styles.verifyText}>ID: {activePatient.id.substring(0,8).toUpperCase()}</Text>
+                  </View>
+                </View>
               </View>
-              <TouchableOpacity style={styles.downloadExcelBtn} onPress={handleDownloadExcel}>
-                <Download size={16} color="#ffffff" style={{ marginRight: 6 }} />
-                <Text style={styles.downloadExcelText}>Download Excel</Text>
-              </TouchableOpacity>
+            </Card>
+
+            {/* Referral Dropdown (Only show in consultation) */}
+            {activePatient.status === 'in_consultation' && (
+              <View style={{ marginBottom: 16 }}>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#475569', marginBottom: 6 }}>Refer Patient to Clinic / Department:</Text>
+                <Select value={referralDeptId} onValueChange={setReferralDeptId}>
+                  <SelectTrigger style={{ backgroundColor: '#fff', borderColor: '#cbd5e1', borderWidth: 1, borderRadius: 8, padding: 12 }}>
+                    <SelectValue placeholder="Select Clinic / Department (Optional)" />
+                  </SelectTrigger>
+                  <SelectContent style={{ backgroundColor: '#fff' }}>
+                    <SelectItem value="">None (Consultation Completed)</SelectItem>
+                    {(appState.departments || []).filter(d => d.id !== staffDeptId).map(d => (
+                      <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </View>
+            )}
+
+            {/* 3. MAIN ACTION AREA */}
+            <View style={styles.mainActionArea}>
+              {activePatient.status === 'waiting' && (
+                <>
+                  <TouchableOpacity style={[styles.completeBtn, { backgroundColor: '#ea580c', flex: 1.5, opacity: isProcessing ? 0.6 : 1 }]} onPress={handleCallPatient} disabled={isProcessing}>
+                    <Volume2 size={24} color="#fff" />
+                    <Text style={styles.completeBtnText}>{isProcessing ? 'Calling...' : 'Call Patient'}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={[styles.completeBtn, { backgroundColor: '#eab308', flex: 1, opacity: isProcessing ? 0.6 : 1 }]} onPress={handleSkipPatient} disabled={isProcessing}>
+                    <Text style={styles.completeBtnText}>{isProcessing ? 'Skipping...' : 'Skip'}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={[styles.completeBtn, { backgroundColor: '#dc2626', flex: 1, opacity: isProcessing ? 0.6 : 1 }]} onPress={handleCancelToken} disabled={isProcessing}>
+                    <Text style={styles.completeBtnText}>{isProcessing ? 'Cancelling...' : 'Cancel'}</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {activePatient.status === 'called' && (
+                <>
+                  <TouchableOpacity style={[styles.completeBtn, { backgroundColor: '#2563eb', flex: 1.5, opacity: isProcessing ? 0.6 : 1 }]} onPress={handleStartConsultation} disabled={isProcessing}>
+                    <Stethoscope size={24} color="#fff" />
+                    <Text style={styles.completeBtnText}>{isProcessing ? 'Starting...' : 'Start Consult'}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={[styles.completeBtn, { backgroundColor: '#eab308', flex: 1, opacity: isProcessing ? 0.6 : 1 }]} onPress={handleSkipPatient} disabled={isProcessing}>
+                    <Text style={styles.completeBtnText}>{isProcessing ? 'Skipping...' : 'Skip'}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={[styles.completeBtn, { backgroundColor: '#dc2626', flex: 1, opacity: isProcessing ? 0.6 : 1 }]} onPress={handleCancelToken} disabled={isProcessing}>
+                    <Text style={styles.completeBtnText}>{isProcessing ? 'Cancelling...' : 'Cancel'}</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {activePatient.status === 'in_consultation' && (
+                <>
+                  <TouchableOpacity
+                    style={[styles.primaryActionBtn, prescriptionMode ? styles.activeActionBtn : null]}
+                    onPress={() => setPrescriptionMode(prescriptionMode ? null : 'template')}
+                  >
+                    <FileText size={20} color={prescriptionMode ? "#fff" : "#2563eb"} />
+                    <Text style={[styles.primaryActionText, prescriptionMode && { color: "#fff" }]}>Prescription</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity style={[styles.completeBtn, { opacity: isProcessing ? 0.6 : 1 }]} onPress={handleMarkComplete} disabled={isProcessing}>
+                    <CheckCircle2 size={24} color="#fff" />
+                    <Text style={styles.completeBtnText}>{isProcessing ? 'Completing...' : 'Complete'}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={[styles.completeBtn, { backgroundColor: '#dc2626', flex: 0.5, opacity: isProcessing ? 0.6 : 1 }]} onPress={handleCancelToken} disabled={isProcessing}>
+                    <Text style={styles.completeBtnText}>{isProcessing ? 'Cancelling...' : 'Cancel'}</Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
 
-            {/* Filter Panel */}
-            <View style={styles.filterCard}>
-              <Text style={styles.filterTitle}>Search & Filters</Text>
+            {/* QR Scanner Section */}
+            <TouchableOpacity style={styles.scanQrBtn} onPress={openScanner}>
+               <QrCode size={20} color="#fff" />
+               <Text style={styles.scanQrBtnText}>Scan QR Code</Text>
+            </TouchableOpacity>
 
-              {/* Search search query */}
-              <View style={styles.filterRow}>
-                <View style={[styles.filterCell, { flex: 2 }]}>
-                  <Text style={styles.filterLabel}>Search Patient Name or ID</Text>
-                  <TextInput
-                    style={styles.filterSearchInput}
-                    placeholder="E.g. Rahul Kumar or PAT-..."
-                    value={recordsSearchQuery}
-                    onChangeText={(val) => {
-                      setRecordsSearchQuery(val);
-                      setRecordsPaginationPage(1);
+            {/* QR Scanner Camera */}
+            {scannerOpen && (
+              <View style={styles.scannerContainer}>
+                <View style={styles.scannerHeader}>
+                  <Text style={styles.scannerTitle}>📷 Scanning...</Text>
+                  <TouchableOpacity onPress={closeScanner} style={styles.closeScannerBtn}>
+                    <Text style={styles.closeScannerText}>✕ Close</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.cameraWrapper}>
+                  <CameraView
+                    style={styles.camera}
+                    facing="back"
+                    barcodeScannerSettings={{
+                      barcodeTypes: ["qr"],
                     }}
+                    onBarcodeScanned={handleBarCodeScanned}
                   />
-                </View>
-              </View>
-
-              {/* Department & Doctor Selects */}
-              <View style={[styles.filterRow, { marginTop: 12 }]}>
-                <View style={styles.filterCell}>
-                  <Text style={styles.filterLabel}>Department</Text>
-                  {Platform.OS === 'web' ? (
-                    <select
-                      value={recordsSelectedDept}
-                      onChange={(e) => {
-                        setRecordsSelectedDept(e.target.value);
-                        setRecordsSelectedDoctor('all');
-                        setRecordsPaginationPage(1);
-                      }}
-                      style={styles.webSelect}
-                    >
-                      <option value="all">All Departments</option>
-                      {appState.departments?.map(d => (
-                        <option key={d.name} value={d.name}>{d.name}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <TextInput
-                      style={styles.filterSearchInput}
-                      placeholder="All Departments"
-                      value={recordsSelectedDept}
-                      onChangeText={(val) => {
-                        setRecordsSelectedDept(val);
-                        setRecordsPaginationPage(1);
-                      }}
-                    />
-                  )}
-                </View>
-
-                <View style={styles.filterCell}>
-                  <Text style={styles.filterLabel}>Doctor</Text>
-                  {Platform.OS === 'web' ? (
-                    <select
-                      value={recordsSelectedDoctor}
-                      onChange={(e) => {
-                        setRecordsSelectedDoctor(e.target.value);
-                        setRecordsPaginationPage(1);
-                      }}
-                      style={styles.webSelect}
-                    >
-                      <option value="all">All Doctors</option>
-                      {availableDocs.map(doc => (
-                        <option key={doc.id} value={doc.id}>{doc.name}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <TextInput
-                      style={styles.filterSearchInput}
-                      placeholder="All Doctors"
-                      value={recordsSelectedDoctor}
-                      onChangeText={(val) => {
-                        setRecordsSelectedDoctor(val);
-                        setRecordsPaginationPage(1);
-                      }}
-                    />
-                  )}
-                </View>
-              </View>
-
-              {/* Date Quick Options */}
-              <View style={[styles.filterRow, { marginTop: 16 }]}>
-                <View style={styles.filterCell}>
-                  <Text style={styles.filterLabel}>Date Quick Filter</Text>
-                  <View style={styles.quickDateRow}>
-                    {dateQuickOptions.map(opt => {
-                      const isActive = recordsDateFilter === opt.key;
-                      return (
-                        <TouchableOpacity
-                          key={opt.key}
-                          style={[styles.quickDateBtn, isActive && styles.quickDateBtnActive]}
-                          onPress={() => {
-                            setRecordsDateFilter(opt.key);
-                            setRecordsPaginationPage(1);
-                          }}
-                        >
-                          <Text style={[styles.quickDateText, isActive && styles.quickDateTextActive]}>
-                            {opt.label}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
+                  {/* Scan overlay frame */}
+                  <View style={styles.scanOverlay}>
+                    <View style={styles.scanFrame}>
+                      <View style={[styles.scanCorner, styles.scanCornerTL]} />
+                      <View style={[styles.scanCorner, styles.scanCornerTR]} />
+                      <View style={[styles.scanCorner, styles.scanCornerBL]} />
+                      <View style={[styles.scanCorner, styles.scanCornerBR]} />
+                    </View>
+                    <Text style={styles.scanHintText}>Align QR code within the frame</Text>
                   </View>
-
-                  {recordsDateFilter === 'custom' && (
-                    <View style={styles.customDateContainer}>
-                      <Text style={[styles.filterLabel, { marginTop: 8 }]}>Custom Date Selection</Text>
-                      {Platform.OS === 'web' ? (
-                        <input
-                          style={styles.webDateInput}
-                          type="date"
-                          value={recordsCustomDate}
-                          onChange={(e) => {
-                            setRecordsCustomDate(e.target.value);
-                            setRecordsPaginationPage(1);
-                          }}
-                        />
-                      ) : (
-                        <TextInput
-                          style={styles.filterSearchInput}
-                          placeholder="YYYY-MM-DD"
-                          value={recordsCustomDate}
-                          onChangeText={(val) => {
-                            setRecordsCustomDate(val);
-                            setRecordsPaginationPage(1);
-                          }}
-                        />
-                      )}
-                    </View>
-                  )}
                 </View>
-              </View>
-            </View>
-
-            {/* Table Container */}
-            <View style={styles.tableCard}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-                <View style={styles.tableContainer}>
-                  {/* Table Header */}
-                  <View style={[styles.tableRow, styles.tableHeaderRowStyle]}>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 140 }]}>Patient ID</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 150 }]}>Patient Name</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 50 }]}>Age</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 80 }]}>Gender</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 130 }]}>Phone Number</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 140 }]}>Department</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 140 }]}>Doctor</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 90 }]}>Token No.</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 110 }]}>Visit Date</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 95 }]}>Visit Time</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 100 }]}>Queue Status</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 100 }]}>Consultation</Text>
-                  </View>
-
-                  {/* Table Body */}
-                  {loadingRecords ? (
-                    <View style={styles.tableLoadingState}>
-                      <Text style={styles.tableLoadingText}>Loading records...</Text>
-                    </View>
-                  ) : paginatedRows.length === 0 ? (
-                    <View style={styles.tableEmptyState}>
-                      <FileText size={48} color="#cbd5e1" style={{ marginBottom: 12 }} />
-                      <Text style={styles.tableEmptyText}>No Patient Records Found</Text>
-                      <Text style={styles.tableEmptySub}>Try adjusting the search query or filters.</Text>
-                    </View>
-                  ) : (
-                    paginatedRows.map((row, index) => {
-                      const isEven = index % 2 === 0;
-                      return (
-                        <View key={row.patientId + '-' + index} style={[styles.tableRow, isEven ? styles.tableRowEven : styles.tableRowOdd]}>
-                          <Text style={[styles.tableBodyCell, { minWidth: 140, fontWeight: '700', color: '#1d4ed8' }]}>{row.patientId}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 150, fontWeight: '700', color: '#0f172a' }]}>{row.patientName}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 50, color: '#334155' }]}>{row.age}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 80, color: '#334155' }]}>{row.gender}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 130, color: '#475569' }]}>{row.phone}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 140, color: '#334155', fontWeight: '500' }]}>{row.department}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 140, color: '#475569', fontStyle: 'italic' }]}>{row.doctor}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 90, fontWeight: '800', color: '#2563eb' }]}>{row.tokenNumber}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 110, color: '#334155' }]}>{row.visitDate}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 95, color: '#334155' }]}>{row.visitTime}</Text>
-                          <View style={{ minWidth: 100, justifyContent: 'center' }}>
-                            <View style={[styles.statusBadgeSmall, row.queueStatus === 'Served' ? styles.statusBadgeServed : styles.statusBadgeWaiting]}>
-                              <Text style={[styles.statusBadgeTextSmall, { color: row.queueStatus === 'Served' ? '#16a34a' : '#d97706' }]}>
-                                {row.queueStatus}
-                              </Text>
-                            </View>
-                          </View>
-                          <View style={{ minWidth: 100, justifyContent: 'center' }}>
-                            <View style={[styles.statusBadgeSmall, row.consultationStatus === 'Completed' ? styles.statusBadgeServed : styles.statusBadgeWaiting]}>
-                              <Text style={[styles.statusBadgeTextSmall, { color: row.consultationStatus === 'Completed' ? '#16a34a' : '#d97706' }]}>
-                                {row.consultationStatus}
-                              </Text>
-                            </View>
-                          </View>
-                        </View>
-                      );
-                    })
-                  )}
-                </View>
-              </ScrollView>
-            </View>
-
-            {/* Pagination Controls */}
-            {filteredRows.length > 0 && (
-              <View style={styles.paginationRow}>
-                <TouchableOpacity
-                  style={[styles.paginationBtn, recordsPaginationPage === 1 && styles.paginationBtnDisabled]}
-                  disabled={recordsPaginationPage === 1}
-                  onPress={() => setRecordsPaginationPage(prev => Math.max(1, prev - 1))}
-                >
-                  <Text style={styles.paginationBtnText}>Previous</Text>
-                </TouchableOpacity>
-
-                <Text style={styles.paginationLabel}>
-                  Page {recordsPaginationPage} of {totalPages} (Total: {filteredRows.length})
-                </Text>
-
-                <TouchableOpacity
-                  style={[styles.paginationBtn, recordsPaginationPage === totalPages && styles.paginationBtnDisabled]}
-                  disabled={recordsPaginationPage === totalPages}
-                  onPress={() => setRecordsPaginationPage(prev => Math.min(totalPages, prev + 1))}
-                >
-                  <Text style={styles.paginationBtnText}>Next</Text>
-                </TouchableOpacity>
               </View>
             )}
-          </ScrollView>
-        );
-      })()}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          QUEUE MANAGEMENT TAB (existing content)
-      ══════════════════════════════════════════════════════════════════════ */}
-      {activeTab === 'queue' && (
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {/* 2. ACTIVE PATIENT CARD */}
-          {activePatient ? (
-            <View style={styles.activePatientContainer}>
-              <Text style={styles.sectionTitle}>Current Patient</Text>
-              <Card style={styles.activeCard}>
-                <View style={styles.activeCardContent}>
-                  <View style={styles.mainTokenArea}>
-                    <Text style={styles.tokenLabel}>TOKEN</Text>
-                    <Text style={styles.largeToken}>{formatTokenId(activePatient.id)}</Text>
-                    <View style={[styles.priorityBadge, { backgroundColor: getPriorityColors(activePatient.type).bg }]}>
-                      <Text style={[styles.priorityText, { color: getPriorityColors(activePatient.type).text }]}>
-                        {getPriorityColors(activePatient.type).name}
-                      </Text>
-                    </View>
+            {/* Scan Result: Completed Patient */}
+            {lastScannedPatient && (
+              <View style={styles.scanResultContainer}>
+                <View style={styles.completedCard}>
+                  <View style={styles.completedHeader}>
+                    <CheckCircle2 size={20} color="#16a34a" />
+                    <Text style={styles.completedHeaderText}>Appointment Completed</Text>
                   </View>
-
-                  <View style={styles.patientDetails}>
-                    <Text style={styles.patientName}>{activePatient.patient?.name || "Patient Name"}</Text>
-                    <Text style={styles.patientAge}>
-                      {activePatient.patient?.age || "--"} Yrs • {activePatient.patient?.gender?.charAt(0).toUpperCase() || "U"}
-                    </Text>
-                    <View style={styles.infoRow}>
-                      <Stethoscope size={14} color="#64748b" />
-                      <Text style={styles.infoText}>{activePatient.primaryDepartment || "General Consultation"}</Text>
+                  <View style={styles.completedBody}>
+                    <View style={styles.completedTokenCircle}>
+                      <Text style={styles.completedTokenText}>{formatTokenId(lastScannedPatient.id)}</Text>
                     </View>
-                    <View style={styles.infoRow}>
-                      <Activity size={14} color="#64748b" />
-                      <Text style={styles.infoText} numberOfLines={1}>
-                        Symptoms: Standard check-up
+                    <View style={styles.completedInfo}>
+                      <Text style={styles.completedName}>{lastScannedPatient.patient?.name || "Patient"}</Text>
+                      <Text style={styles.completedDetail}>
+                        {lastScannedPatient.patient?.age || "--"} Yrs • {lastScannedPatient.primaryDepartment || "General"}
                       </Text>
-                    </View>
-                    <View style={styles.verifyContainer}>
-                      <Text style={styles.verifyText}>ID: {activePatient.id.substring(0, 8).toUpperCase()}</Text>
+                      <View style={styles.completedBadge}>
+                        <Text style={styles.completedBadgeText}>✓ Done</Text>
+                      </View>
                     </View>
                   </View>
                 </View>
-              </Card>
 
-              {/* 3. MAIN ACTION AREA */}
-              <View style={styles.mainActionArea}>
-                <TouchableOpacity
-                  style={[styles.primaryActionBtn, prescriptionMode ? styles.activeActionBtn : null]}
-                  onPress={() => setPrescriptionMode(prescriptionMode ? null : 'template')}
-                >
-                  <FileText size={20} color={prescriptionMode ? "#fff" : "#2563eb"} />
-                  <Text style={[styles.primaryActionText, prescriptionMode && { color: "#fff" }]}>Prescription</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.completeBtn} onPress={handleMarkComplete}>
-                  <CheckCircle2 size={24} color="#fff" />
-                  <Text style={styles.completeBtnText}>Mark Complete</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* QR Scanner Section */}
-              <TouchableOpacity style={styles.scanQrBtn} onPress={openScanner}>
-                <QrCode size={20} color="#fff" />
-                <Text style={styles.scanQrBtnText}>Scan QR Code</Text>
-              </TouchableOpacity>
-
-              {/* QR Scanner Camera */}
-              {scannerOpen && (
-                <View style={styles.scannerContainer}>
-                  <View style={styles.scannerHeader}>
-                    <Text style={styles.scannerTitle}>📷 Scanning...</Text>
-                    <TouchableOpacity onPress={closeScanner} style={styles.closeScannerBtn}>
-                      <Text style={styles.closeScannerText}>✕ Close</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <View style={styles.cameraWrapper}>
-                    <CameraView
-                      style={styles.camera}
-                      facing="back"
-                      barcodeScannerSettings={{
-                        barcodeTypes: ["qr"],
-                      }}
-                      onBarcodeScanned={handleBarCodeScanned}
-                    />
-                    {/* Scan overlay frame */}
-                    <View style={styles.scanOverlay}>
-                      <View style={styles.scanFrame}>
-                        <View style={[styles.scanCorner, styles.scanCornerTL]} />
-                        <View style={[styles.scanCorner, styles.scanCornerTR]} />
-                        <View style={[styles.scanCorner, styles.scanCornerBL]} />
-                        <View style={[styles.scanCorner, styles.scanCornerBR]} />
-                      </View>
-                      <Text style={styles.scanHintText}>Align QR code within the frame</Text>
+                {/* Next Patient's Turn */}
+                {nextPatientAfterScan ? (
+                  <View style={styles.nextPatientCard}>
+                    <View style={styles.nextPatientHeader}>
+                      <Activity size={18} color="#2563eb" />
+                      <Text style={styles.nextPatientHeaderText}>Next Patient's Turn</Text>
                     </View>
-                  </View>
-                </View>
-              )}
-
-              {/* Scan Result: Completed Patient */}
-              {lastScannedPatient && (
-                <View style={styles.scanResultContainer}>
-                  <View style={styles.completedCard}>
-                    <View style={styles.completedHeader}>
-                      <CheckCircle2 size={20} color="#16a34a" />
-                      <Text style={styles.completedHeaderText}>Appointment Completed</Text>
-                    </View>
-                    <View style={styles.completedBody}>
-                      <View style={styles.completedTokenCircle}>
-                        <Text style={styles.completedTokenText}>{formatTokenId(lastScannedPatient.id)}</Text>
-                      </View>
-                      <View style={styles.completedInfo}>
-                        <Text style={styles.completedName}>{lastScannedPatient.patient?.name || "Patient"}</Text>
-                        <Text style={styles.completedDetail}>
-                          {lastScannedPatient.patient?.age || "--"} Yrs • {lastScannedPatient.primaryDepartment || "General"}
+                    <View style={styles.nextPatientBody}>
+                      <View style={[styles.nextTokenCircle, { backgroundColor: getPriorityColors(nextPatientAfterScan.type).bg }]}>
+                        <Text style={[styles.nextTokenText, { color: getPriorityColors(nextPatientAfterScan.type).text }]}>
+                          {formatTokenId(nextPatientAfterScan.id)}
                         </Text>
-                        <View style={styles.completedBadge}>
-                          <Text style={styles.completedBadgeText}>✓ Done</Text>
-                        </View>
+                      </View>
+                      <View style={styles.nextPatientInfo}>
+                        <Text style={styles.nextPatientName}>{nextPatientAfterScan.patient?.name || "Patient"}</Text>
+                        <Text style={styles.nextPatientDetail}>
+                          {nextPatientAfterScan.patient?.age || "--"} Yrs • {nextPatientAfterScan.primaryDepartment || "General"}
+                        </Text>
+                      </View>
+                      <View style={[styles.nextPriorityBadge, { borderColor: getPriorityColors(nextPatientAfterScan.type).border }]}>
+                        <Text style={[styles.nextPriorityText, { color: getPriorityColors(nextPatientAfterScan.type).text }]}>
+                          {getPriorityColors(nextPatientAfterScan.type).name}
+                        </Text>
                       </View>
                     </View>
                   </View>
+                ) : (
+                  <View style={styles.noMorePatientsCard}>
+                    <CheckCircle2 size={24} color="#22c55e" />
+                    <Text style={styles.noMorePatientsText}>All appointments completed! 🎉</Text>
+                  </View>
+                )}
+              </View>
+            )}
 
-                  {/* Next Patient's Turn */}
-                  {nextPatientAfterScan ? (
-                    <View style={styles.nextPatientCard}>
-                      <View style={styles.nextPatientHeader}>
-                        <Activity size={18} color="#2563eb" />
-                        <Text style={styles.nextPatientHeaderText}>Next Patient's Turn</Text>
-                      </View>
-                      <View style={styles.nextPatientBody}>
-                        <View style={[styles.nextTokenCircle, { backgroundColor: getPriorityColors(nextPatientAfterScan.type).bg }]}>
-                          <Text style={[styles.nextTokenText, { color: getPriorityColors(nextPatientAfterScan.type).text }]}>
-                            {formatTokenId(nextPatientAfterScan.id)}
-                          </Text>
-                        </View>
-                        <View style={styles.nextPatientInfo}>
-                          <Text style={styles.nextPatientName}>{nextPatientAfterScan.patient?.name || "Patient"}</Text>
-                          <Text style={styles.nextPatientDetail}>
-                            {nextPatientAfterScan.patient?.age || "--"} Yrs • {nextPatientAfterScan.primaryDepartment || "General"}
-                          </Text>
-                        </View>
-                        <View style={[styles.nextPriorityBadge, { borderColor: getPriorityColors(nextPatientAfterScan.type).border }]}>
-                          <Text style={[styles.nextPriorityText, { color: getPriorityColors(nextPatientAfterScan.type).text }]}>
-                            {getPriorityColors(nextPatientAfterScan.type).name}
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-                  ) : (
-                    <View style={styles.noMorePatientsCard}>
-                      <CheckCircle2 size={24} color="#22c55e" />
-                      <Text style={styles.noMorePatientsText}>All appointments completed! 🎉</Text>
-                    </View>
-                  )}
+            {/* 4. PRESCRIPTION PANEL */}
+            {prescriptionMode && (
+              <View style={styles.prescriptionPanel}>
+                {/* 3 Row-wise options */}
+                <View style={styles.prescriptionTabs}>
+                  <TouchableOpacity 
+                    style={[styles.tabBtn, prescriptionMode === 'template' && styles.activeTab]}
+                    onPress={() => setPrescriptionMode('template')}
+                  >
+                     <Text style={[styles.tabText, prescriptionMode === 'template' && styles.activeTabText]}>Template</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.tabBtn, prescriptionMode === 'upload' && styles.activeTab]}
+                    onPress={() => setPrescriptionMode('upload')}
+                  >
+                     <Text style={[styles.tabText, prescriptionMode === 'upload' && styles.activeTabText]}>Upload</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.tabBtn, prescriptionMode === 'scan' && styles.activeTab]}
+                    onPress={() => setPrescriptionMode('scan')}
+                  >
+                     <Text style={[styles.tabText, prescriptionMode === 'scan' && styles.activeTabText]}>Scan</Text>
+                  </TouchableOpacity>
                 </View>
-              )}
 
-              {/* 4. PRESCRIPTION PANEL */}
-              {prescriptionMode && (
-                <View style={styles.prescriptionPanel}>
-                  {/* 3 Row-wise options */}
-                  <View style={styles.prescriptionTabs}>
-                    <TouchableOpacity
-                      style={[styles.tabBtn, prescriptionMode === 'template' && styles.activeTab]}
-                      onPress={() => setPrescriptionMode('template')}
-                    >
-                      <Text style={[styles.tabText, prescriptionMode === 'template' && styles.activeTabText]}>Template</Text>
+                {/* 4A. USE PRESCRIPTION TEMPLATE */}
+                {prescriptionMode === 'template' && (
+                  <View style={styles.panelContent}>
+                    <Text style={styles.subTitle}>Quick Templates</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsContainer}>
+                      {TEMPLATES.map((tmpl, idx) => (
+                        <TouchableOpacity key={idx} style={styles.chip} onPress={() => handleApplyTemplate(tmpl)}>
+                          <Text style={styles.chipText}>{tmpl.name}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+
+                    <Text style={styles.label}>Problem / Diagnosis</Text>
+                    <TextInput 
+                      style={styles.inputArea} 
+                      value={diagnosis} 
+                      onChangeText={setDiagnosis}
+                      placeholder="Enter diagnosis..."
+                    />
+
+                    <Text style={[styles.label, {marginTop: 12}]}>Medicines & Dosage</Text>
+                    {medicines.map((med, index) => (
+                      <View key={index} style={styles.medicineRow}>
+                        <TextInput 
+                          style={[styles.inputField, {flex: 2}]} 
+                          placeholder="Medicine Name" 
+                          value={med.name} 
+                          onChangeText={(v) => updateMedicine(index, 'name', v)}
+                        />
+                        <View style={styles.medCol}>
+                           <TextInput 
+                             style={[styles.inputField, {marginBottom: 4}]} 
+                             placeholder="Dosage (e.g., 1-0-1)" 
+                             value={med.dosage} 
+                             onChangeText={(v) => updateMedicine(index, 'dosage', v)}
+                           />
+                           <View style={styles.quickDosages}>
+                             {QUICK_DOSAGE.map(q => (
+                               <TouchableOpacity key={q} style={styles.dosageChip} onPress={() => updateMedicine(index, 'dosage', q)}>
+                                 <Text style={styles.dosageChipText}>{q}</Text>
+                               </TouchableOpacity>
+                             ))}
+                           </View>
+                        </View>
+                        <TextInput 
+                          style={[styles.inputField, {flex: 0.8}]} 
+                          placeholder="Days" 
+                          value={med.days} 
+                          keyboardType="numeric"
+                          onChangeText={(v) => updateMedicine(index, 'days', v)}
+                        />
+                      </View>
+                    ))}
+                    <TouchableOpacity style={styles.addMedBtn} onPress={addMedicineRow}>
+                      <Plus size={16} color="#2563eb" />
+                      <Text style={styles.addMedText}>Add Medicine</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.tabBtn, prescriptionMode === 'upload' && styles.activeTab]}
-                      onPress={() => setPrescriptionMode('upload')}
-                    >
-                      <Text style={[styles.tabText, prescriptionMode === 'upload' && styles.activeTabText]}>Upload</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.tabBtn, prescriptionMode === 'scan' && styles.activeTab]}
-                      onPress={() => setPrescriptionMode('scan')}
-                    >
-                      <Text style={[styles.tabText, prescriptionMode === 'scan' && styles.activeTabText]}>Scan</Text>
+
+                    <Text style={[styles.label, {marginTop: 12}]}>Advice / Precautions</Text>
+                    <TextInput 
+                      style={[styles.inputArea, {height: 60}]} 
+                      value={advice} 
+                      onChangeText={setAdvice}
+                      placeholder="Write short advice..."
+                      multiline
+                    />
+
+                    <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
+                      <Save size={18} color="#fff" style={{marginRight: 8}}/>
+                      <Text style={styles.saveRxText}>Save Prescription</Text>
                     </TouchableOpacity>
                   </View>
+                )}
 
-                  {/* 4A. USE PRESCRIPTION TEMPLATE */}
-                  {prescriptionMode === 'template' && (
-                    <View style={styles.panelContent}>
-                      <Text style={styles.subTitle}>Quick Templates</Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsContainer}>
-                        {TEMPLATES.map((tmpl, idx) => (
-                          <TouchableOpacity key={idx} style={styles.chip} onPress={() => handleApplyTemplate(tmpl)}>
-                            <Text style={styles.chipText}>{tmpl.name}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-
-                      <Text style={styles.label}>Problem / Diagnosis</Text>
-                      <TextInput
-                        style={styles.inputArea}
-                        value={diagnosis}
-                        onChangeText={setDiagnosis}
-                        placeholder="Enter diagnosis..."
-                      />
-
-                      <Text style={[styles.label, { marginTop: 12 }]}>Medicines & Dosage</Text>
-                      {medicines.map((med, index) => (
-                        <View key={index} style={styles.medicineRow}>
-                          <TextInput
-                            style={[styles.inputField, { flex: 2 }]}
-                            placeholder="Medicine Name"
-                            value={med.name}
-                            onChangeText={(v) => updateMedicine(index, 'name', v)}
-                          />
-                          <View style={styles.medCol}>
-                            <TextInput
-                              style={[styles.inputField, { marginBottom: 4 }]}
-                              placeholder="Dosage (e.g., 1-0-1)"
-                              value={med.dosage}
-                              onChangeText={(v) => updateMedicine(index, 'dosage', v)}
-                            />
-                            <View style={styles.quickDosages}>
-                              {QUICK_DOSAGE.map(q => (
-                                <TouchableOpacity key={q} style={styles.dosageChip} onPress={() => updateMedicine(index, 'dosage', q)}>
-                                  <Text style={styles.dosageChipText}>{q}</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-                          </View>
-                          <TextInput
-                            style={[styles.inputField, { flex: 0.8 }]}
-                            placeholder="Days"
-                            value={med.days}
-                            keyboardType="numeric"
-                            onChangeText={(v) => updateMedicine(index, 'days', v)}
-                          />
-                        </View>
-                      ))}
-                      <TouchableOpacity style={styles.addMedBtn} onPress={addMedicineRow}>
-                        <Plus size={16} color="#2563eb" />
-                        <Text style={styles.addMedText}>Add Medicine</Text>
-                      </TouchableOpacity>
-
-                      <Text style={[styles.label, { marginTop: 12 }]}>Advice / Precautions</Text>
-                      <TextInput
-                        style={[styles.inputArea, { height: 60 }]}
-                        value={advice}
-                        onChangeText={setAdvice}
-                        placeholder="Write short advice..."
-                        multiline
-                      />
-
-                      <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
-                        <Save size={18} color="#fff" style={{ marginRight: 8 }} />
-                        <Text style={styles.saveRxText}>Save Prescription</Text>
+                {/* 4B. UPLOAD PRESCRIPTION */}
+                {prescriptionMode === 'upload' && (
+                  <View style={styles.panelContent}>
+                    <View style={styles.uploadArea}>
+                      <Upload size={48} color="#94a3b8" style={{marginBottom: 12}}/>
+                      <Text style={styles.uploadText}>Tap to choose Image or PDF</Text>
+                      <TouchableOpacity style={styles.chooseFileBtn}>
+                        <Text style={styles.chooseFileText}>Choose File</Text>
                       </TouchableOpacity>
                     </View>
-                  )}
+                    <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
+                      <Save size={18} color="#fff" style={{marginRight: 8}}/>
+                      <Text style={styles.saveRxText}>Save Prescription</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
 
-                  {/* 4B. UPLOAD PRESCRIPTION */}
-                  {prescriptionMode === 'upload' && (
-                    <View style={styles.panelContent}>
-                      <View style={styles.uploadArea}>
-                        <Upload size={48} color="#94a3b8" style={{ marginBottom: 12 }} />
-                        <Text style={styles.uploadText}>Tap to choose Image or PDF</Text>
+                {/* 4C. SCAN PRESCRIPTION */}
+                {prescriptionMode === 'scan' && (
+                  <View style={styles.panelContent}>
+                    <View style={styles.scanArea}>
+                      <Camera size={48} color="#94a3b8" style={{marginBottom: 12}}/>
+                      <Text style={styles.uploadText}>Camera Preview</Text>
+                      <View style={{flexDirection: 'row', gap: 12, marginTop: 16}}>
+                        <TouchableOpacity style={[styles.chooseFileBtn, {backgroundColor: '#e2e8f0'}]}>
+                          <Text style={[styles.chooseFileText, {color: '#475569'}]}>Start Camera</Text>
+                        </TouchableOpacity>
                         <TouchableOpacity style={styles.chooseFileBtn}>
-                          <Text style={styles.chooseFileText}>Choose File</Text>
+                          <Text style={styles.chooseFileText}>Capture Scan</Text>
                         </TouchableOpacity>
                       </View>
-                      <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
-                        <Save size={18} color="#fff" style={{ marginRight: 8 }} />
-                        <Text style={styles.saveRxText}>Save Prescription</Text>
-                      </TouchableOpacity>
                     </View>
-                  )}
-
-                  {/* 4C. SCAN PRESCRIPTION */}
-                  {prescriptionMode === 'scan' && (
-                    <View style={styles.panelContent}>
-                      <View style={styles.scanArea}>
-                        <Camera size={48} color="#94a3b8" style={{ marginBottom: 12 }} />
-                        <Text style={styles.uploadText}>Camera Preview</Text>
-                        <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
-                          <TouchableOpacity style={[styles.chooseFileBtn, { backgroundColor: '#e2e8f0' }]}>
-                            <Text style={[styles.chooseFileText, { color: '#475569' }]}>Start Camera</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity style={styles.chooseFileBtn}>
-                            <Text style={styles.chooseFileText}>Capture Scan</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                      <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
-                        <Save size={18} color="#fff" style={{ marginRight: 8 }} />
-                        <Text style={styles.saveRxText}>Save Prescription</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </View>
-              )}
-
-            </View>
-          ) : (
-            <View style={styles.emptyState}>
-              <CheckCircle2 size={64} color="#22c55e" style={{ marginBottom: 16 }} />
-              <Text style={styles.emptyTitle}>Queue Clear</Text>
-              <Text style={styles.emptySub}>No patients waiting for consultation.</Text>
-            </View>
-          )}
-
-          {/* 5. UPCOMING QUEUE SECTION */}
-          <View style={styles.queueSection}>
-            <Text style={styles.sectionTitle}>Upcoming Queue (All {upcomingQueue.length})</Text>
-            <ScrollView
-              style={styles.upcomingQueueScroll}
-              showsVerticalScrollIndicator={true}
-              nestedScrollEnabled={true}
-            >
-              {upcomingQueue.map((item) => (
-                <View key={item.id} style={styles.queueItem}>
-                  <View style={[styles.smallTokenCircle, { backgroundColor: getPriorityColors(item.type).bg }]}>
-                    <Text style={[styles.smallTokenText, { color: getPriorityColors(item.type).text }]}>
-                      {formatTokenId(item.id)}
-                    </Text>
+                    <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
+                      <Save size={18} color="#fff" style={{marginRight: 8}}/>
+                      <Text style={styles.saveRxText}>Save Prescription</Text>
+                    </TouchableOpacity>
                   </View>
-                  <View style={styles.queueItemInfo}>
-                    <Text style={styles.queueItemName}>{item.patient?.name || "Patient"}</Text>
-                    <Text style={styles.queueItemType}>{item.primaryDepartment || "General"}</Text>
-                  </View>
-                  <View style={[styles.queueBadge, { borderColor: getPriorityColors(item.type).border }]}>
-                    <Text style={[styles.queueBadgeText, { color: getPriorityColors(item.type).text }]}>
-                      {getPriorityColors(item.type).name}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-              {upcomingQueue.length === 0 && (
-                <Text style={styles.emptyQueueText}>No upcoming patients.</Text>
-              )}
-            </ScrollView>
+                )}
+              </View>
+            )}
+
           </View>
+        ) : (
+          <View style={styles.emptyState}>
+            <CheckCircle2 size={64} color="#22c55e" style={{ marginBottom: 16 }} />
+            <Text style={styles.emptyTitle}>Queue Clear</Text>
+            <Text style={styles.emptySub}>No patients are currently waiting in your department.</Text>
+          </View>
+        )}
 
-        </ScrollView>
-      )}
+        {/* 5. UPCOMING QUEUE SECTION */}
+        <View style={styles.queueSection}>
+          <Text style={styles.sectionTitle}>Upcoming Queue (Next {upcomingQueue.length})</Text>
+          {upcomingQueue.map((item) => (
+            <View key={item.id} style={styles.queueItem}>
+              <View style={[styles.smallTokenCircle, { backgroundColor: getPriorityColors(item.type).bg }]}>
+                <Text style={[styles.smallTokenText, { color: getPriorityColors(item.type).text }]}>
+                  {formatTokenId(item.id)}
+                </Text>
+              </View>
+              <View style={styles.queueItemInfo}>
+                <Text style={styles.queueItemName}>{item.patient?.name || "Patient"}</Text>
+                <Text style={styles.queueItemType}>{item.primaryDepartment || "General"}</Text>
+              </View>
+              <View style={[styles.queueBadge, { borderColor: getPriorityColors(item.type).border }]}>
+                <Text style={[styles.queueBadgeText, { color: getPriorityColors(item.type).text }]}>
+                  {getPriorityColors(item.type).name}
+                </Text>
+              </View>
+            </View>
+          ))}
+          {upcomingQueue.length === 0 && (
+            <Text style={styles.emptyQueueText}>No upcoming patients.</Text>
+          )}
+        </View>
+
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -1743,334 +1645,6 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: "center", justifyContent: "center", padding: 40, backgroundColor: "#fff", borderRadius: 16, marginBottom: 24, borderWidth: 1, borderColor: "#e2e8f0" },
   emptyTitle: { fontSize: 22, fontWeight: "700", color: "#0f172a", marginBottom: 8 },
   emptySub: { fontSize: 15, color: "#64748b", textAlign: "center" },
-  upcomingQueueScroll: { maxHeight: 350, marginTop: 4 },
-
-  // ─── Main Tab Bar ───────────────────────────────────────────────────────
-  mainTabBar: {
-    flexDirection: "row",
-    borderTopWidth: 1,
-    borderTopColor: "#f1f5f9",
-    backgroundColor: "#ffffff",
-  },
-  mainTabBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 11,
-    borderBottomWidth: 2,
-    borderBottomColor: "transparent",
-  },
-  mainTabBtnActive: {
-    borderBottomColor: "#2563eb",
-    backgroundColor: "#eff6ff",
-  },
-  mainTabText: { fontSize: 13, fontWeight: "600", color: "#64748b" },
-  mainTabTextActive: { color: "#2563eb" },
-
-  // ─── Live Queue Display ─────────────────────────────────────────────────
-  liveHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 16,
-  },
-  liveTitle: { fontSize: 18, fontWeight: "800", color: "#0f172a" },
-  liveSubtitle: { fontSize: 13, color: "#64748b", marginTop: 2 },
-  liveUpdatedBadge: {
-    backgroundColor: "#f1f5f9",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
-  },
-  liveUpdatedText: { fontSize: 11, color: "#475569", fontWeight: "600" },
-  liveEmptyState: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 60,
-    backgroundColor: "#ffffff",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-  },
-  liveEmptyTitle: { fontSize: 20, fontWeight: "700", color: "#334155", marginTop: 16, marginBottom: 6 },
-  liveEmptySub: { fontSize: 14, color: "#94a3b8", textAlign: "center" },
-  liveCard: {
-    flexDirection: "row",
-    backgroundColor: "#ffffff",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    marginBottom: 10,
-    overflow: "hidden",
-    elevation: 1,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-  },
-  liveAccentBar: { width: 5 },
-  liveCardBody: { flex: 1, padding: 14 },
-  liveDeptName: { fontSize: 15, fontWeight: "800", color: "#0f172a", marginBottom: 10 },
-  liveInfoRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#f8fafc",
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    marginBottom: 8,
-  },
-  liveInfoCell: { flex: 1, alignItems: "center" },
-  liveInfoLabel: { fontSize: 10, color: "#94a3b8", fontWeight: "700", letterSpacing: 0.5, marginBottom: 3, textTransform: "uppercase" },
-  liveInfoValue: { fontSize: 16, fontWeight: "900", color: "#0f172a" },
-  liveDivider: { width: 1, height: 36, backgroundColor: "#e2e8f0", marginHorizontal: 4 },
-  liveStatusBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 8,
-  },
-  liveStatusActive: { backgroundColor: "#f0fdf4" },
-  liveStatusPaused: { backgroundColor: "#fffbeb" },
-  liveStatusDot: { fontSize: 10 },
-  liveStatusText: { fontSize: 11, fontWeight: "700" },
-  liveQueueCount: { fontSize: 12, color: "#94a3b8", fontWeight: "500" },
-
-  // ─── Patient Records Tab ────────────────────────────────────────────────
-  downloadExcelBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#16a34a",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  downloadExcelText: {
-    color: "#ffffff",
-    fontWeight: "700",
-    fontSize: 14,
-  },
-  filterCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    marginBottom: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 3,
-    elevation: 1,
-  },
-  filterTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: "#1e293b",
-    marginBottom: 12,
-  },
-  filterRow: {
-    flexDirection: "row",
-    gap: 12,
-    flexWrap: "wrap",
-  },
-  filterCell: {
-    flex: 1,
-    minWidth: 150,
-  },
-  filterLabel: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#64748b",
-    marginBottom: 6,
-  },
-  filterSearchInput: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: "#1e293b",
-    backgroundColor: "#f8fafc",
-    width: "100%",
-  },
-  webSelect: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: "#1e293b",
-    backgroundColor: "#ffffff",
-    width: "100%",
-    outlineStyle: "none",
-  },
-  webDateInput: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: "#1e293b",
-    backgroundColor: "#ffffff",
-    width: "100%",
-    fontFamily: "inherit",
-    outlineStyle: "none",
-  },
-  quickDateRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  quickDateBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: "#f1f5f9",
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-  },
-  quickDateBtnActive: {
-    backgroundColor: "#eff6ff",
-    borderColor: "#2563eb",
-    borderWidth: 1,
-  },
-  quickDateText: {
-    fontSize: 12,
-    color: "#475569",
-    fontWeight: "600",
-  },
-  quickDateTextActive: {
-    color: "#2563eb",
-    fontWeight: "700",
-  },
-  customDateContainer: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#f1f5f9",
-  },
-  tableCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    marginBottom: 16,
-    overflow: "hidden",
-  },
-  tableContainer: {
-    minWidth: "100%",
-  },
-  tableRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderBottomWidth: 1,
-    borderBottomColor: "#f1f5f9",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-  },
-  tableHeaderRowStyle: {
-    backgroundColor: "#f8fafc",
-    borderBottomWidth: 2,
-    borderBottomColor: "#e2e8f0",
-  },
-  tableHeaderCell: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: "#475569",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  tableRowEven: {
-    backgroundColor: "#ffffff",
-  },
-  tableRowOdd: {
-    backgroundColor: "#fdfdfd",
-  },
-  tableBodyCell: {
-    fontSize: 13,
-    color: "#334155",
-    paddingRight: 8,
-  },
-  statusBadgeSmall: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    alignSelf: "flex-start",
-  },
-  statusBadgeServed: {
-    backgroundColor: "#f0fdf4",
-  },
-  statusBadgeWaiting: {
-    backgroundColor: "#fffbeb",
-  },
-  statusBadgeTextSmall: {
-    fontSize: 11,
-    fontWeight: "700",
-    textTransform: "capitalize",
-  },
-  tableLoadingState: {
-    paddingVertical: 60,
-    alignItems: "center",
-  },
-  tableLoadingText: {
-    color: "#64748b",
-    fontSize: 14,
-  },
-  tableEmptyState: {
-    paddingVertical: 60,
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 600,
-  },
-  tableEmptyText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#475569",
-  },
-  tableEmptySub: {
-    fontSize: 13,
-    color: "#94a3b8",
-    marginTop: 4,
-  },
-  paginationRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 12,
-  },
-  paginationBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: "#ffffff",
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-  },
-  paginationBtnDisabled: {
-    opacity: 0.5,
-    backgroundColor: "#f1f5f9",
-  },
-  paginationBtnText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#334155",
-  },
-  paginationLabel: {
-    fontSize: 13,
-    color: "#64748b",
-    fontWeight: "600",
-  },
+  formLabel: { fontSize: 13, fontWeight: '600', color: '#475569', marginBottom: 4 },
+  formInput: { borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, backgroundColor: '#fff', color: '#1e293b' },
 });
