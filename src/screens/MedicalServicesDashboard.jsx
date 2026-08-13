@@ -1,4 +1,3 @@
-var _interopRequireWildcard = require("@babel/runtime/helpers/interopRequireWildcard");
 var _interopRequireDefault = require("@babel/runtime/helpers/interopRequireDefault"); Object.defineProperty(exports, "__esModule", { value: true }); exports.PatientDashboard = PatientDashboard; var _asyncToGenerator2 = _interopRequireDefault(require("@babel/runtime/helpers/asyncToGenerator")); var _slicedToArray2 = _interopRequireDefault(require("@babel/runtime/helpers/slicedToArray")); var _react = _interopRequireWildcard(require("react"));
 var _reactNative = require("react-native");
 var _useTranslation = require("../hooks/useTranslation");
@@ -12,6 +11,7 @@ var _badge = require("../components/ui/badge");
 
 var _lucideReactNative = require("lucide-react-native");
 var _asyncStorage = _interopRequireDefault(require("@react-native-async-storage/async-storage")); 
+var _supabaseClient = require("../services/supabaseClient");
 var _jsxRuntime = require("react/jsx-runtime"); function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }// import { Progress } from './ui/progress';
 
 
@@ -30,8 +30,6 @@ function PatientDashboard() {
     var _useState7 = (0, _react.useState)(null), _useState8 = (0, _slicedToArray2.default)(_useState7, 2), latestPrescription = _useState8[0], setLatestPrescription = _useState8[1];
     var pulseAnim = (0, _react.useRef)(new _reactNative.Animated.Value(0)).current;
 
-    var _firebase = require("../services/firebase");
-
     (0, _react.useEffect)(function() {
         if (!state.patientInfo) return;
         var patientId = state.patientInfo.phone || state.patientInfo.email;
@@ -40,21 +38,18 @@ function PatientDashboard() {
         var activeToken = state.tokens.find(function(t) { return t.patient.email === state.patientInfo.email && t.status === 'active'; });
         if (!activeToken) return;
 
-        var q = (0, _firebase.query)(
-            (0, _firebase.collection)(_firebase.db, 'prescriptions'),
-            (0, _firebase.where)('token_id', '==', activeToken.id)
-        );
+        var setPrescriptionFromPayload = function(payload) {
+            if (payload.new && payload.new.token_id === activeToken.id) {
+                setLatestPrescription(payload.new);
+            }
+        };
 
-        var unsubscribe = (0, _firebase.onSnapshot)(q, function(snapshot) {
-            snapshot.forEach(function(docSnap) {
-                setLatestPrescription(docSnap.data());
-            });
-        }, function(err) {
-            console.error("Firestore MedicalServicesDashboard prescription sub error:", err);
-        });
+        var channel = _supabaseClient.supabase.channel('public:prescriptions')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'prescriptions', filter: 'patient_id=eq.' + patientId }, setPrescriptionFromPayload)
+            .subscribe();
 
         return function() {
-            unsubscribe();
+            _supabaseClient.supabase.removeChannel(channel);
         };
     }, [state.patientInfo, state.tokens]);
 

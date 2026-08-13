@@ -1,22 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-import { auth, signOut, onAuthStateChanged } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 
 export default function HomeScreen({ navigation }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
+    // 1. Get the current user session
+    const fetchSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setUser(session?.user || null);
       setLoading(false);
-    });
+    };
 
-    return () => unsubscribe();
+    fetchSession();
   }, []);
 
   const handleSignOut = async () => {
-    await signOut(auth);
+    await supabase.auth.signOut();
+    // 2. Clear stack and go back to login
     navigation.reset({
       index: 0,
       routes: [{ name: 'PhoneLoginScreen' }],
@@ -39,10 +42,10 @@ export default function HomeScreen({ navigation }) {
       {user ? (
         <View style={styles.card}>
           <Text style={styles.infoLabel}>User ID:</Text>
-          <Text style={styles.infoValue}>{user.uid}</Text>
+          <Text style={styles.infoValue}>{user.id}</Text>
           
           <Text style={styles.infoLabel}>Phone Number:</Text>
-          <Text style={styles.infoValue}>{user.phoneNumber || 'N/A'}</Text>
+          <Text style={styles.infoValue}>{user.phone}</Text>
         </View>
       ) : (
         <Text style={styles.errorText}>No user session found.</Text>

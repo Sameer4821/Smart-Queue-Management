@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ActivityIndicator, View } from 'react-native';
-import { auth, onAuthStateChanged } from './lib/firebase';
+import { supabase } from './lib/supabase';
 
 // Import Screens
 import PhoneLoginScreen from './screens/PhoneLoginScreen';
@@ -16,12 +16,18 @@ export default function App_OTP() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setSession(user ? { user } : null);
+    // Check active session on mount
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    // Listen for auth state changes (e.g., login, logout)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   if (loading) {
@@ -36,12 +42,14 @@ export default function App_OTP() {
     <NavigationContainer>
       <Stack.Navigator
         screenOptions={{
-          headerShown: false,
+          headerShown: false, // Hide headers for a cleaner visual
         }}
       >
         {session && session.user ? (
+          // If User is authenticated, show Home Screen
           <Stack.Screen name="HomeScreen" component={HomeScreen} />
         ) : (
+          // Unauthenticated Stack
           <>
             <Stack.Screen name="PhoneLoginScreen" component={PhoneLoginScreen} />
             <Stack.Screen name="OtpScreen" component={OtpScreen} />

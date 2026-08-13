@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Phone, ArrowLeft, User } from 'lucide-react-native';
 import { toast } from 'sonner-native';
 import { useAppContext } from '../context/AppContext';
-import { auth, signInWithPhoneNumber, RecaptchaVerifier } from '../services/firebase';
+import { supabase } from '../services/supabaseClient';
 
 export function PatientRegistrationScreen() {
     const { setState } = useAppContext();
@@ -39,43 +39,21 @@ export function PatientRegistrationScreen() {
         const formattedPhone = phone.startsWith('+') ? phone : `+91${phone}`;
 
         try {
-            let confirmationResult = null;
-            
-            // Web / Expo Web Recaptcha setup
-            if (Platform.OS === 'web' && typeof window !== 'undefined') {
-                if (!window.recaptchaVerifier) {
-                    window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-                        size: 'invisible',
-                        callback: () => {}
-                    });
-                }
-                const appVerifier = window.recaptchaVerifier;
-                confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
-            } else {
-                // Native React Native / fallback
-                try {
-                    confirmationResult = await signInWithPhoneNumber(auth, formattedPhone);
-                } catch (e) {
-                    console.log("Native phone auth trigger attempt:", e);
-                }
-            }
+            const { error } = await supabase.auth.signInWithOtp({
+                phone: formattedPhone
+            });
+
+            if (error) throw error;
 
             toast.success('OTP sent to your mobile number');
             setState(prev => ({
                 ...prev,
                 pendingRegistrationPhone: formattedPhone,
-                confirmationResult: confirmationResult,
                 currentView: 'otp-verification'
             }));
         } catch (error) {
-            console.error('Firebase OTP Send Error:', error);
-            // Fallback for local testing / demo without strict Firebase SMS setup
-            toast.info('Moving to OTP verification screen');
-            setState(prev => ({
-                ...prev,
-                pendingRegistrationPhone: formattedPhone,
-                currentView: 'otp-verification'
-            }));
+            console.error('OTP Send Error:', error);
+            toast.error(error.message || 'Failed to send OTP. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -85,7 +63,6 @@ export function PatientRegistrationScreen() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
             <SafeAreaView style={{ flex: 1 }}>
                 <ScrollView contentContainerStyle={styles.content}>
-                    <View id="recaptcha-container" />
                     <View style={styles.header}>
                         <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
                             <ArrowLeft size={20} color="#374151" />

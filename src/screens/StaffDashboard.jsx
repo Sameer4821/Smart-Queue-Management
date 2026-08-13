@@ -32,7 +32,7 @@ import {
 } from "lucide-react-native";
 import { Card } from "../components/ui/card";
 import { toast } from "sonner-native";
-import { db, collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy } from "../services/firebase";
+import { supabase } from "../services/supabaseClient";
 
 // Template data
 const TEMPLATES = [
@@ -103,38 +103,48 @@ export function StaffDashboard() {
     }
   }, [allActiveTokens]);
 
-  // Firestore Real-Time Sync for Token Queue
+  // Supabase Real-Time Sync for Token Queue
   useEffect(() => {
-    const tokensRef = collection(db, 'tokens');
-    const unsubscribe = onSnapshot(tokensRef, (snapshot) => {
-      const tokensList = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        const tokenId = data.id || data.token_id || docSnap.id;
-        tokensList.push({
-          id: tokenId,
-          type: data.type || (tokenId && tokenId.startsWith('EME') ? 'emergency' : tokenId && tokenId.startsWith('ACE') ? 'disabled' : 'common'),
-          primaryDepartment: data.primaryDepartment || data.department || 'General',
-          timestamp: data.createdAt ? new Date(data.createdAt) : new Date(),
-          patient: data.patient || { name: data.patient_name || 'Patient' },
-          status: data.status === 'completed' ? 'completed' : 'active',
-          qrCode: tokenId
-        });
-      });
+    const channel = supabase.channel('public:queue_sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newRow = payload.new;
+          const mappedToken = {
+             id: newRow.token_id,
+             type: newRow.token_id && newRow.token_id.startsWith('EME') ? 'emergency' : newRow.token_id && newRow.token_id.startsWith('ACE') ? 'disabled' : 'common',
+             primaryDepartment: newRow.department,
+             timestamp: newRow.created_at ? new Date(newRow.created_at) : new Date(),
+             patient: {
+                name: newRow.patient_name || 'Walk-in Patient',
+             },
+             status: newRow.status || 'active',
+             qrCode: newRow.token_id
+          };
 
-      if (tokensList.length > 0) {
-        setAppState(prev => {
-          const map = new Map();
-          prev.tokens.forEach(t => map.set(t.id, t));
-          tokensList.forEach(t => map.set(t.id, { ...map.get(t.id), ...t }));
-          return { ...prev, tokens: Array.from(map.values()) };
-        });
-      }
-    }, (err) => {
-      console.error("Firestore StaffDashboard subscription error:", err);
-    });
+          setAppState(prev => {
+             const exists = prev.tokens.find(t => t.id === mappedToken.id);
+             if (exists) return prev;
+             return { ...prev, tokens: [...prev.tokens, mappedToken] };
+          });
+        } 
+        else if (payload.eventType === 'UPDATE') {
+          setAppState(prev => ({
+             ...prev,
+             tokens: prev.tokens.map(t => t.id === payload.new.token_id ? { ...t, status: payload.new.status } : t)
+          }));
+        } 
+        else if (payload.eventType === 'DELETE') {
+          setAppState(prev => ({
+             ...prev,
+             tokens: prev.tokens.filter(t => t.id !== payload.old.token_id)
+          }));
+        }
+      })
+      .subscribe();
 
-    return () => unsubscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleBack = () => {
@@ -178,10 +188,9 @@ export function StaffDashboard() {
 
     addPrescriptionToToken(activePatient.id, prescription);
 
-    // Save to Firestore prescriptions collection
+    // Save to Supabase to trigger realtime sync
     try {
-      await setDoc(doc(db, 'prescriptions', prescription.id), {
-        id: prescription.id,
+      const { error } = await supabase.from('prescriptions').insert({
         token_id: activePatient.id,
         patient_id: activePatient.patient?.phone || activePatient.patient?.email || "unknown",
         doctor_id: appState.staffInfo?.id || 'staff',
@@ -189,11 +198,14 @@ export function StaffDashboard() {
         diagnosis,
         medicines,
         advice,
-        mode: prescriptionMode,
-        createdAt: new Date().toISOString()
+        mode: prescriptionMode
       });
+      if (error) {
+        console.error("Supabase insert error:", error);
+        toast.error("Sync partial", { description: "Saved locally but failed to push to server." });
+      }
     } catch (err) {
-      console.error("Error saving prescription to Firestore:", err);
+      console.error("Error saving prescription to Supabase:", err);
     }
     
     toast.success("Prescription Saved", {
@@ -211,11 +223,11 @@ export function StaffDashboard() {
     if (!activePatient) return;
 
     try {
-      // Update Firestore tokens collection document
-      await updateDoc(doc(db, 'tokens', activePatient.id), {
-        status: 'completed',
-        updatedAt: new Date().toISOString()
-      });
+      // Update Supabase queue table
+      await supabase
+        .from('queue')
+        .update({ status: 'completed' })
+        .eq('token_id', activePatient.id);
 
       // Optimistic update
       const updatedTokens = appState.tokens.map((token) =>
@@ -233,7 +245,6 @@ export function StaffDashboard() {
       const remainingTokens = allActiveTokens.filter(t => t.id !== activePatient.id);
       setActivePatient(remainingTokens.length > 0 ? remainingTokens[0] : null);
     } catch (error) {
-      console.error("Complete consultation error:", error);
       toast.error("Error", { description: "Failed to mark patient as completed." });
     }
   };
@@ -281,11 +292,11 @@ export function StaffDashboard() {
     }
 
     try {
-      // Update Firestore tokens collection
-      await updateDoc(doc(db, 'tokens', matchedToken.id), {
-        status: 'completed',
-        updatedAt: new Date().toISOString()
-      });
+      // Update Supabase queue table
+      await supabase
+        .from('queue')
+        .update({ status: 'completed' })
+        .eq('token_id', matchedToken.id);
 
       // Optimistic upate
       const updatedTokens = appState.tokens.map((token) =>

@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Platform } from 'react-native';
-import { auth, signInWithPhoneNumber, RecaptchaVerifier } from '../lib/firebase';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { supabase } from '../lib/supabase';
 
 export default function PhoneLoginScreen({ navigation }) {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleContinue = async () => {
+    // Validate phone number format (must include country code)
     if (!phoneNumber || phoneNumber.length < 10 || !phoneNumber.startsWith('+')) {
       Alert.alert('Invalid Format', 'Please enter a valid phone number with country code (e.g., +91XXXXXXXXXX)');
       return;
@@ -14,23 +15,20 @@ export default function PhoneLoginScreen({ navigation }) {
 
     setLoading(true);
     try {
-      let confirmationResult = null;
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        if (!window.recaptchaVerifier) {
-          window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-            size: 'invisible'
-          });
-        }
-        confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, window.recaptchaVerifier);
-      } else {
-        confirmationResult = await signInWithPhoneNumber(auth, phoneNumber);
-      }
+      // 1. Send OTP to the phone number using Supabase Auth
+      const { error } = await supabase.auth.signInWithOtp({
+        phone: phoneNumber,
+      });
 
-      navigation.navigate('OtpScreen', { phoneNumber, confirmationResult });
+      if (error) {
+        Alert.alert('OTP Send Failure', error.message);
+      } else {
+        // 2. On success, navigate to OtpScreen passing the phone number
+        navigation.navigate('OtpScreen', { phoneNumber });
+      }
     } catch (err) {
+      Alert.alert('Network Error', 'An unexpected error occurred. Please try again.');
       console.error(err);
-      // Demo navigation if network test env
-      navigation.navigate('OtpScreen', { phoneNumber });
     } finally {
       setLoading(false);
     }
@@ -38,7 +36,6 @@ export default function PhoneLoginScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <View id="recaptcha-container" />
       <Text style={styles.title}>Welcome</Text>
       <Text style={styles.subtitle}>Enter your phone number to continue</Text>
 

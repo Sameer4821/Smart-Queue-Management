@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { ShieldCheck, ArrowLeft } from 'lucide-react-native';
 import { toast } from 'sonner-native';
 import { useAppContext } from '../context/AppContext';
-import { auth, db, doc, setDoc, getDoc, signInWithPhoneNumber, RecaptchaVerifier } from '../services/firebase';
+import { supabase } from '../services/supabaseClient';
 import { OTPInput } from '../components/OTPInput';
 
 export function OTPVerificationScreen() {
@@ -16,7 +16,6 @@ export function OTPVerificationScreen() {
     const [otpError, setOtpError] = useState(false);
 
     const phone = state.pendingRegistrationPhone || '';
-    const confirmationResult = state.confirmationResult;
 
     const handleBack = () => {
         setState(prev => ({ ...prev, currentView: 'portal' }));
@@ -25,16 +24,8 @@ export function OTPVerificationScreen() {
     const handleResendOtp = async () => {
         setLoading(true);
         try {
-            if (Platform.OS === 'web' && typeof window !== 'undefined') {
-                if (!window.recaptchaVerifier) {
-                    window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-                        size: 'invisible'
-                    });
-                }
-                const appVerifier = window.recaptchaVerifier;
-                const newConfirm = await signInWithPhoneNumber(auth, phone, appVerifier);
-                setState(prev => ({ ...prev, confirmationResult: newConfirm }));
-            }
+            const { error } = await supabase.auth.signInWithOtp({ phone });
+            if (error) throw error;
             setOtp(['', '', '', '', '', '']);
             setOtpError(false);
             toast.success('New OTP sent successfully');
@@ -58,40 +49,53 @@ export function OTPVerificationScreen() {
         setOtpError(false);
 
         try {
-            let userId = `user_${Date.now()}`;
+            // 1. Verify OTP with Supabase Auth
+            const { data: authData, error: authError } = await supabase.auth.verifyOtp({
+                phone,
+                token: otpValue,
+                type: 'sms'
+            });
 
-            // 1. Verify OTP with Firebase Auth confirmation result if available
-            if (confirmationResult && typeof confirmationResult.confirm === 'function') {
-                const userCredential = await confirmationResult.confirm(otpValue);
-                if (userCredential && userCredential.user) {
-                    userId = userCredential.user.uid;
+            if (authError || !authData.session) {
+                console.error("Auth Error:", authError);
+                throw new Error("Invalid OTP or verification failed.");
+            }
+
+            const userId = authData.user.id;
+
+            // 2. Check if patient exists, otherwise insert into `patients` table
+            const { data: existingPatient, error: selectError } = await supabase
+                .from('patients')
+                .select('*')
+                .eq('id', userId)
+                .single();
+
+            if (selectError && selectError.code !== 'PGRST116') { // PGRST116 means no rows found
+                console.error("Select Error:", selectError);
+                // Don't throw here, we can still proceed with session
+            }
+
+            if (!existingPatient) {
+                const { error: insertError } = await supabase
+                    .from('patients')
+                    .insert([{
+                        id: userId,
+                        phone_number: phone
+                    }]);
+
+                if (insertError) {
+                    console.error("Insert Patient Error:", insertError);
+                    // Non-blocking but should be logged
                 }
             }
 
-            // 2. Save/Update patient in Firestore `users` collection
-            try {
-                const userDocRef = doc(db, 'users', userId);
-                const userSnap = await getDoc(userDocRef);
-                if (!userSnap.exists()) {
-                    await setDoc(userDocRef, {
-                        uid: userId,
-                        phone_number: phone,
-                        name: 'Patient',
-                        createdAt: new Date().toISOString()
-                    });
-                }
-            } catch (fsErr) {
-                console.error("Firestore user creation warning:", fsErr);
-            }
-
-            // 3. Update app context with patient info
+            // 3. Update app context with generic patient info (for backward compatibility)
             setState(prev => ({
                 ...prev,
                 patientInfo: {
-                    name: 'Patient',
+                    name: 'Patient', // Placeholder, can be asked later
                     email: '',
-                    phone: phone,
-                    uid: userId
+                    phone: phone
                 },
                 currentView: 'patient-dashboard'
             }));
@@ -111,7 +115,6 @@ export function OTPVerificationScreen() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
             <SafeAreaView style={{ flex: 1 }}>
                 <ScrollView contentContainerStyle={styles.content}>
-                    <View id="recaptcha-container" />
                     <View style={styles.header}>
                         <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
                             <ArrowLeft size={20} color="#374151" />

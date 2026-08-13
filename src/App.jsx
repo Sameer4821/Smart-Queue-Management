@@ -1,5 +1,4 @@
 var _interopRequireDefault = require("@babel/runtime/helpers/interopRequireDefault");
-var _interopRequireWildcard = require("@babel/runtime/helpers/interopRequireWildcard");
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.default = App;
 var _toConsumableArray2 = _interopRequireDefault(
@@ -34,10 +33,38 @@ var _EmergencyUserFlow = require("./components/EmergencyUserFlow");
 var _DisabledUserFlow = require("./components/DisabledUserFlow");
 var _TokenDisplay = require("./components/TokenDisplay");
 var _ConsultationCompleted = require("./components/ConsultationCompleted");
-var _firebase = require("./services/firebase");
+var _StaffDashboard = require("./screens/StaffDashboard");
+var _supabaseClient = require("./services/supabaseClient");
 
 var _sonnerNative = require("sonner-native");
 var _jsxRuntime = require("react/jsx-runtime");
+function _interopRequireWildcard(e, t) {
+  if ("function" == typeof WeakMap)
+    var r = new WeakMap(),
+      n = new WeakMap();
+  return (_interopRequireWildcard = function _interopRequireWildcard(e, t) {
+    if (!t && e && e.__esModule) return e;
+    var o,
+      i,
+      f = { __proto__: null, default: e };
+    if (null === e || ("object" != typeof e && "function" != typeof e))
+      return f;
+    if ((o = t ? n : r)) {
+      if (o.has(e)) return o.get(e);
+      o.set(e, f);
+    }
+    for (var _t in e)
+      "default" !== _t &&
+        {}.hasOwnProperty.call(e, _t) &&
+        ((i =
+          (o = Object.defineProperty) &&
+          Object.getOwnPropertyDescriptor(e, _t)) &&
+        (i.get || i.set)
+          ? o(f, _t, i)
+          : (f[_t] = e[_t]));
+    return f;
+  })(e, t);
+}
 
 // Helper function to get all department names
 var getAllDepartmentNames = function getAllDepartmentNames() {
@@ -220,58 +247,90 @@ function AppContent() {
     })();
     loadData();
     
-var _firebase = require("./services/firebase");
-
-    // Subscribe to real-time events on Firestore 'tokens' collection using onSnapshot
-    var tokensCollection = (0, _firebase.collection)(_firebase.db, 'tokens');
-
-    var unsubscribeQueue = (0, _firebase.onSnapshot)(tokensCollection, function(snapshot) {
-        var fetchedTokens = [];
-        var allDepartments = getAllDepartmentNames();
-
-        snapshot.forEach(function(docSnap) {
-            var data = docSnap.data();
-            var tokenId = data.id || data.token_id || docSnap.id;
-            var tokenType = data.type || (tokenId && tokenId.startsWith('EME') ? 'emergency' : tokenId && tokenId.startsWith('ACE') ? 'disabled' : 'common');
-            var createdAtDate = data.createdAt ? new Date(data.createdAt) : data.timestamp ? new Date(data.timestamp) : new Date();
-
-            fetchedTokens.push(Object.assign({}, data, {
-                id: tokenId,
-                type: tokenType,
-                primaryDepartment: data.primaryDepartment || data.department || 'General',
-                status: data.status === 'completed' ? 'completed' : 'active',
-                timestamp: createdAtDate,
-                validUntil: data.validUntil ? new Date(data.validUntil) : new Date(createdAtDate.getTime() + 24 * 3600000),
-                departmentAccess: data.departmentAccess || allDepartments,
-                patient: data.patient || {
-                    name: data.patient_name || 'Patient',
-                    email: '',
-                    phone: '',
-                    age: 0,
-                    gender: 'not specified',
-                    patientId: `PAT-${Date.now()}`
-                },
-                visits: data.visits || [],
-                prescriptions: data.prescriptions || [],
-                labTests: data.labTests || []
-            }));
-        });
-
-        if (fetchedTokens.length > 0) {
-            setState(function(prev) {
-                var updatedMap = new Map();
-                prev.tokens.forEach(function(t) { updatedMap.set(t.id, t); });
-                fetchedTokens.forEach(function(t) { updatedMap.set(t.id, Object.assign({}, updatedMap.get(t.id) || {}, t)); });
-                
-                return Object.assign({}, prev, { tokens: Array.from(updatedMap.values()) });
-            });
-        }
-    }, function(error) {
-        console.error("Firestore onSnapshot error:", error);
-    });
-
+    // Initial fetch from Supabase queue table to populate active non-completed queues for everyone
+    var initQueue = /*#__PURE__*/ (function () {
+      var _refQ = (0, _asyncToGenerator2.default)(function* () {
+         var _yield$supabase$from = yield _supabaseClient.supabase.from('queue').select('*').neq('status', 'completed').order('created_at', { ascending: true }), data = _yield$supabase$from.data, error = _yield$supabase$from.error;
+         if (!error && data) {
+             setState(function(prev) {
+                 var updatedTokens = (0, _toConsumableArray2.default)(prev.tokens);
+                 data.forEach(function(row) {
+                     var exists = updatedTokens.find(function(t) { return t.id === row.token_id; });
+                     if (!exists) {
+                         // Build a rich local token object mapped from the flat SQL row
+                         updatedTokens.push({
+                            id: row.token_id,
+                            type: row.token_id && row.token_id.startsWith('EME') ? 'emergency' : row.token_id && row.token_id.startsWith('ACE') ? 'disabled' : 'common',
+                            primaryDepartment: row.department,
+                            status: 'active', // 'active' corresponds to 'waiting' or 'called' mostly in this app
+                            timestamp: new Date(row.created_at),
+                            validUntil: new Date(new Date(row.created_at).getTime() + 24 * 3600000),
+                            departmentAccess: [row.department],
+                            patient: {
+                                name: row.patient_name,
+                                email: '',
+                                phone: '',
+                                age: 0,
+                                gender: 'not specified',
+                                patientId: `PAT-${Date.now()}`
+                            },
+                            visits: [],
+                            prescriptions: [],
+                            labTests: []
+                         });
+                     } else {
+                         // Update status if it changed via real-time logic while app was partially unloaded
+                         if (row.status === 'completed' || row.status === 'called') {
+                             exists.status = row.status === 'completed' ? 'completed' : 'active';
+                             if (!exists.visits) exists.visits = [];
+                         }
+                     }
+                 });
+                 return Object.assign({}, prev, { tokens: updatedTokens });
+             });
+         }
+      });
+      return function initQueue() { return _refQ.apply(this, arguments); };
+    })();
+    initQueue();
+    
+    // Subscribe to real-time events on the 'queue' table
+    var queueSubscription = _supabaseClient.supabase.channel('public:queue')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, function(payload) {
+            if (payload.eventType === 'INSERT') {
+                setState(function(prev) {
+                    var exists = prev.tokens.find(function(t) { return t.id === payload.new.token_id; });
+                    if (exists) return prev; // If current device made the token, it's already richly populated locally
+                    
+                    var newRichToken = {
+                        id: payload.new.token_id,
+                        type: payload.new.token_id && payload.new.token_id.startsWith('EME') ? 'emergency' : payload.new.token_id && payload.new.token_id.startsWith('ACE') ? 'disabled' : 'common',
+                        primaryDepartment: payload.new.department,
+                        status: 'active',
+                        timestamp: new Date(payload.new.created_at),
+                        validUntil: new Date(new Date().getTime() + 24 * 3600000),
+                        departmentAccess: [payload.new.department],
+                        patient: {
+                            name: payload.new.patient_name,
+                            email: '', phone: '', age: 0, gender: 'not specified', patientId: `PAT-${Date.now()}`
+                        },
+                        visits: [], prescriptions: [], labTests: []
+                    };
+                    return Object.assign({}, prev, { tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens), [newRichToken]) });
+                });
+            } else if (payload.eventType === 'UPDATE') {
+                setState(function(prev) {
+                    return Object.assign({}, prev, { tokens: prev.tokens.map(function(t) {
+                        return t.id === payload.new.token_id 
+                            ? Object.assign({}, t, { status: payload.new.status === 'completed' ? 'completed' : 'active' })
+                            : t;
+                    })});
+                });
+            }
+        }).subscribe();
+        
     return function() {
-        unsubscribeQueue();
+        _supabaseClient.supabase.removeChannel(queueSubscription);
     };
   }, []);
 

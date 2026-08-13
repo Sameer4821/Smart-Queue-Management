@@ -1,4 +1,3 @@
-var _interopRequireWildcard = require("@babel/runtime/helpers/interopRequireWildcard");
 var _interopRequireDefault = require("@babel/runtime/helpers/interopRequireDefault"); Object.defineProperty(exports, "__esModule", { value: true }); exports.CommonUserFlow = CommonUserFlow; var _toConsumableArray2 = _interopRequireDefault(require("@babel/runtime/helpers/toConsumableArray")); var _asyncToGenerator2 = _interopRequireDefault(require("@babel/runtime/helpers/asyncToGenerator")); var _slicedToArray2 = _interopRequireDefault(require("@babel/runtime/helpers/slicedToArray")); var _react = _interopRequireWildcard(require("react"));
 var _reactNative = require("react-native");
 var _AppContext = require("../context/AppContext");
@@ -11,7 +10,8 @@ var _select = require("./ui/select");
 
 var _badge = require("./ui/badge");
 var _lucideReactNative = require("lucide-react-native"); var _jsxRuntime = require("react/jsx-runtime"); function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }
-// Firebase real-time integration active
+// Assuming sonner is being used via some native equivalent or we can just use Alert
+var _supabaseClient = require("../services/supabaseClient");
 
 var manualTimeSlots = [
     { time: '09:00', label: '9:00 AM', crowdLevel: 'Low', color: '#16a34a' },
@@ -134,8 +134,6 @@ function CommonUserFlow() {
         };
     };
 
-var _firebase = require("../services/firebase");
-
     var handleTokenGeneration = /*#__PURE__*/function () {
         var _ref = (0, _asyncToGenerator2.default)(function* () {
             if (formData.schedulingMethod === 'manual' && !formData.timeSlot) {
@@ -143,42 +141,16 @@ var _firebase = require("../services/firebase");
             }
             try {
                 var newToken = generateToken();
+                // 1. Insert into Supabase logic
+                yield _supabaseClient.supabase.from('queue').insert([{
+                    token_id: newToken.id,
+                    patient_name: newToken.patient.name,
+                    department: newToken.primaryDepartment,
+                    doctor_id: formData.assignedDoctor || null,
+                    status: 'waiting'
+                }]);
                 
-                // Firestore atomic transaction to prevent race conditions and duplicate positions
-                yield (0, _firebase.runTransaction)(_firebase.db, /*#__PURE__*/function () {
-                    var _tr = (0, _asyncToGenerator2.default)(function* (transaction) {
-                        var queueRef = (0, _firebase.doc)(_firebase.db, 'queues', newToken.primaryDepartment);
-                        var tokenRef = (0, _firebase.doc)(_firebase.db, 'tokens', newToken.id);
-                        var queueSnap = yield transaction.get(queueRef);
-
-                        var currentCount = 0;
-                        if (queueSnap.exists()) {
-                            currentCount = queueSnap.data().totalTokensToday || 0;
-                        }
-                        var nextCount = currentCount + 1;
-
-                        transaction.set(tokenRef, Object.assign({}, newToken, {
-                            timestamp: newToken.timestamp.toISOString(),
-                            scheduledTime: newToken.scheduledTime ? newToken.scheduledTime.toISOString() : null,
-                            validUntil: newToken.validUntil ? newToken.validUntil.toISOString() : null,
-                            createdAt: newToken.createdAt ? newToken.createdAt.toISOString() : new Date().toISOString(),
-                            token_id: newToken.id,
-                            patient_name: newToken.patient.name,
-                            department: newToken.primaryDepartment,
-                            doctor_id: formData.assignedDoctor || null,
-                            status: 'waiting',
-                            updatedAt: new Date().toISOString()
-                        }));
-
-                        transaction.set(queueRef, {
-                            totalTokensToday: nextCount,
-                            lastUpdated: new Date().toISOString()
-                        }, { merge: true });
-                    });
-                    return function (_x) { return _tr.apply(this, arguments); };
-                }());
-                
-                // Local State update for instant UI feedback
+                // 2. Local State fallback (realtime handles other clients, this ensures instantly loaded UI here)
                 setState(function (prev) {
                     return Object.assign({},
                         prev, {
@@ -186,9 +158,10 @@ var _firebase = require("../services/firebase");
                         currentToken: newToken,
                         currentView: 'token'
                     });
-                });
+                }
+                );
             } catch (error) {
-                console.error("Firestore Transaction Error (CommonUserFlow):", error);
+                console.log(error);
             }
         }); return function handleTokenGeneration() { return _ref.apply(this, arguments); };
     }();
