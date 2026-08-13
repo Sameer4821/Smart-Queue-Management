@@ -36,7 +36,8 @@
     "react-native-view-shot": "~4.0.3",
     "react-native-web": "~0.19.13",
     "sonner-native": "^0.23.1",
-    "tailwind-merge": "*"
+    "tailwind-merge": "*",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"
