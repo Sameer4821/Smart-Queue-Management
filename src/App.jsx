@@ -33,13 +33,9 @@ var _EmergencyUserFlow = require("./components/EmergencyUserFlow");
 var _DisabledUserFlow = require("./components/DisabledUserFlow");
 var _TokenDisplay = require("./components/TokenDisplay");
 var _ConsultationCompleted = require("./components/ConsultationCompleted");
-var _AgenticChatbot = require("./components/AgenticChatbot");
 var _StaffDashboard = require("./screens/StaffDashboard");
-var _KioskFlow = require("./components/KioskFlow");
-var _PublicDisplay = require("./components/PublicDisplay");
-var _OperationsSummary = require("./components/OperationsSummary");
-
 var _supabaseClient = require("./services/supabaseClient");
+
 var _sonnerNative = require("sonner-native");
 var _jsxRuntime = require("react/jsx-runtime");
 function _interopRequireWildcard(e, t) {
@@ -215,104 +211,27 @@ function AppContent() {
     authCompleted = _useState4[0],
     setAuthCompleted = _useState4[1];
 
-  // Load data from Supabase on mount
+  // Load data from AsyncStorage on mount
   (0, _react.useEffect)(function () {
     var loadData = /*#__PURE__*/ (function () {
       var _ref = (0, _asyncToGenerator2.default)(function* () {
-        try {
-            // Load departments and doctors
-            const { data: dbDepts } = yield _supabaseClient.supabase.from('departments').select('*');
-            const { data: dbDocs } = yield _supabaseClient.supabase.from('doctors').select('*');
-            const { data: dbVisits } = yield _supabaseClient.supabase.from('queue_visits').select('*').order('sequence_order', { ascending: true });
-            
-            if (dbDepts) {
-                const mappedDepts = dbDepts.map(d => {
-                    const deptDocs = dbDocs ? dbDocs.filter(doc => doc.department_id === d.id) : [];
-                    return {
-                        id: d.id,
-                        name: d.name,
-                        type: d.type || 'consultation',
-                        averageWaitTime: d.average_wait_time || 15,
-                        services: d.services || [],
-                        doctors: deptDocs.map(doc => ({
-                            id: doc.id,
-                            name: doc.name,
-                            specialization: doc.specialization || '',
-                            experience: doc.experience || 0,
-                            status: doc.status || 'available'
-                        }))
-                    };
-                });
-                setState(function(prev) {
-                    return Object.assign({}, prev, { departments: mappedDepts });
-                });
-            }
-
-            var supabaseData = yield _supabaseClient.supabase.from('queue').select('*').order('created_at', { ascending: true });
-            if (supabaseData.data && supabaseData.data.length > 0) {
-                var tokensToSet = [];
-                var seenTokenIds = new Set();
-                supabaseData.data.forEach(function(row) {
-                    if (row.token_id && seenTokenIds.has(row.token_id)) {
-                        return; // Skip duplicate records of the same token
-                    }
-                    if (row.token_data) {
-                        try {
-                            var deserialized = deserializeTokens(JSON.stringify([row.token_data]))[0];
-                            if (deserialized) {
-                                deserialized.id = row.token_id;
-                                deserialized.status = row.status || deserialized.status;
-                                deserialized.room_counter = row.room_counter || deserialized.room_counter;
-                                deserialized.booking_type = row.booking_type || deserialized.booking_type;
-                                
-                                // Map visits/journey from queue_visits relation
-                                const tokenVisits = dbVisits ? dbVisits.filter(v => v.token_id === row.token_id) : [];
-                                if (tokenVisits.length > 0) {
-                                    deserialized.visits = tokenVisits.map(v => {
-                                        const matchedDoc = dbDocs ? dbDocs.find(doc => doc.id === v.doctor_id) : null;
-                                        return {
-                                            id: v.id,
-                                            department_id: v.department_id,
-                                            department: v.department_id === 'gen_med' ? 'General Medicine' : 
-                                                        v.department_id === 'cardio' ? 'Cardiology' :
-                                                        v.department_id === 'ent' ? 'ENT' :
-                                                        v.department_id === 'ortho' ? 'Orthopedics' :
-                                                        v.department_id === 'lab' ? 'Laboratory' :
-                                                        v.department_id === 'pharm' ? 'Pharmacy' : v.department_id,
-                                            status: v.status,
-                                            room_counter: v.room_counter,
-                                            doctorName: matchedDoc ? matchedDoc.name : null,
-                                            notes: v.notes,
-                                            timestamp: v.created_at
-                                        };
-                                    });
-                                }
-                                
-                                tokensToSet.push(deserialized);
-                                if (row.token_id) {
-                                    seenTokenIds.add(row.token_id);
-                                }
-                            }
-                        } catch(e) {}
-                    }
-                });
-                setState(function (prev) {
-                    return Object.assign({}, prev, { tokens: tokensToSet });
-                });
-            } else {
-                // local fallback if offline or failed
-                var savedTokens = yield _asyncStorage.default.getItem("hospital-tokens");
-                if (savedTokens) {
-                    var tokens = deserializeTokens(savedTokens);
-                    setState(function (prev) { return Object.assign({}, prev, { tokens: tokens }); });
-                }
-            }
-        } catch(e) {
-            console.error("Failed to fetch supabase:", e);
-        }
+        var savedTokens =
+          yield _asyncStorage.default.getItem("hospital-tokens");
         var savedEmergencyCount = yield _asyncStorage.default.getItem(
           "emergency-count-" + new Date().toDateString(),
         );
+
+        if (savedTokens) {
+          try {
+            var tokens = deserializeTokens(savedTokens);
+            setState(function (prev) {
+              return Object.assign({}, prev, { tokens: tokens });
+            });
+          } catch (error) {
+            console.error("Error loading tokens:", error);
+            yield _asyncStorage.default.removeItem("hospital-tokens");
+          }
+        }
 
         if (savedEmergencyCount) {
           setState(function (prev) {
@@ -321,200 +240,205 @@ function AppContent() {
             });
           });
         }
-
-        var savedLanguage = yield _asyncStorage.default.getItem("hospital-language");
-        var savedPatientInfo = yield _asyncStorage.default.getItem("current-patient-info");
-        if (savedPatientInfo) {
-            try {
-                var parsedPatient = JSON.parse(savedPatientInfo);
-                setState(function(prev) {
-                    // Check if currentToken exists in loaded tokens to restore view
-                    const activeToken = prev.tokens.find(t => {
-                        const tPhone = t.patient_phone || (t.patient && t.patient.phone);
-                        return tPhone === parsedPatient.phone && t.status !== 'completed' && t.status !== 'cancelled';
-                    });
-                    return Object.assign({}, prev, { 
-                        language: savedLanguage || prev.language,
-                        patientInfo: parsedPatient,
-                        currentToken: activeToken || prev.currentToken,
-                        currentView: activeToken ? 'token' : (prev.currentView === 'portal' ? 'patient-dashboard' : prev.currentView)
-                    });
-                });
-            } catch(e) {}
-        } else if (savedLanguage) {
-            setState(function(prev) {
-                return Object.assign({}, prev, { language: savedLanguage });
-            });
-        }
       });
       return function loadData() {
         return _ref.apply(this, arguments);
       };
     })();
     loadData();
+    
+    // Initial fetch from Supabase queue table to populate active non-completed queues for everyone
+    var initQueue = /*#__PURE__*/ (function () {
+      var _refQ = (0, _asyncToGenerator2.default)(function* () {
+         var _yield$supabase$from = yield _supabaseClient.supabase.from('queue').select('*').neq('status', 'completed').order('created_at', { ascending: true }), data = _yield$supabase$from.data, error = _yield$supabase$from.error;
+         if (!error && data) {
+             setState(function(prev) {
+                 var updatedTokens = (0, _toConsumableArray2.default)(prev.tokens);
+                 var seenTokenIds = new Set(updatedTokens.map(function (t) { return t.id; }));
+                 data.forEach(function(row) {
+                     if (seenTokenIds.has(row.token_id)) return;
+                     seenTokenIds.add(row.token_id);
+                     var exists = updatedTokens.find(function(t) { return t.id === row.token_id; });
+                     if (!exists) {
+                         // Build a rich local token object mapped from the flat SQL row
+                         updatedTokens.push({
+                            id: row.token_id,
+                            type: row.token_id && row.token_id.startsWith('EME') ? 'emergency' : row.token_id && row.token_id.startsWith('ACE') ? 'disabled' : 'common',
+                            primaryDepartment: row.department,
+                            status: 'active', // 'active' corresponds to 'waiting' or 'called' mostly in this app
+                            timestamp: new Date(row.created_at),
+                            validUntil: new Date(new Date(row.created_at).getTime() + 24 * 3600000),
+                            departmentAccess: [row.department],
+                            patient: {
+                                name: row.patient_name,
+                                email: '',
+                                phone: '',
+                                age: 0,
+                                gender: 'not specified',
+                                patientId: `PAT-${Date.now()}`
+                            },
+                            visits: [],
+                            prescriptions: [],
+                            labTests: []
+                         });
+                     } else {
+                         // Update status if it changed via real-time logic while app was partially unloaded
+                         if (row.status === 'completed' || row.status === 'called') {
+                             exists.status = row.status === 'completed' ? 'completed' : 'active';
+                             if (!exists.visits) exists.visits = [];
+                         }
+                     }
+                 });
+                 return Object.assign({}, prev, { tokens: updatedTokens });
+             });
+         }
+      });
+      return function initQueue() { return _refQ.apply(this, arguments); };
+    })();
+    initQueue();
+    
+    // Subscribe to real-time events on the 'queue' table and 'queue_visits' table
+    var queueSubscription = _supabaseClient.supabase.channel('public:queue')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, function(payload) {
+            if (payload.eventType === 'INSERT') {
+                setState(function(prev) {
+                    var exists = prev.tokens.find(function(t) { return t.id === payload.new.token_id; });
+                    if (exists) return prev; // If current device made the token, it's already richly populated locally
+                    
+                    var newRichToken = {
+                        id: payload.new.token_id,
+                        type: payload.new.token_id && payload.new.token_id.startsWith('EME') ? 'emergency' : payload.new.token_id && payload.new.token_id.startsWith('ACE') ? 'disabled' : 'common',
+                        primaryDepartment: payload.new.department,
+                        status: 'active',
+                        timestamp: new Date(payload.new.created_at),
+                        validUntil: new Date(new Date().getTime() + 24 * 3600000),
+                        departmentAccess: [payload.new.department],
+                        patient: {
+                            name: payload.new.patient_name,
+                            email: '', phone: '', age: 0, gender: 'not specified', patientId: `PAT-${Date.now()}`
+                        },
+                        visits: [], prescriptions: [], labTests: []
+                    };
+                    return Object.assign({}, prev, { tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens), [newRichToken]) });
+                });
+            } else if (payload.eventType === 'UPDATE') {
+                setState(function(prev) {
+                    return Object.assign({}, prev, { tokens: prev.tokens.map(function(t) {
+                        return t.id === payload.new.token_id 
+                            ? Object.assign({}, t, { status: payload.new.status === 'completed' ? 'completed' : 'active' })
+                            : t;
+                    })});
+                });
+            }
+        }).subscribe();
+        
+    var visitsChannel = _supabaseClient.supabase.channel('public:queue_visits')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'queue_visits' }, function(payload) {
+            if (payload.eventType === 'INSERT') {
+                var newVisit = payload.new;
+                setState(function(prev) {
+                    return Object.assign({}, prev, {
+                        tokens: prev.tokens.map(function(t) {
+                            if (t.id === newVisit.token_id) {
+                                t.visits = t.visits || [];
+                                const existingVisitIndex = t.visits.findIndex(v => v.id === newVisit.id || (v.department_id === newVisit.department_id && String(v.id).startsWith('visit-')));
+                                
+                                const formattedVisit = {
+                                    id: newVisit.id,
+                                    department_id: newVisit.department_id,
+                                    department: newVisit.department_id === 'gen_med' ? 'General Medicine' : 
+                                                newVisit.department_id === 'cardio' ? 'Cardiology' :
+                                                newVisit.department_id === 'ent' ? 'ENT' :
+                                                newVisit.department_id === 'ortho' ? 'Orthopedics' :
+                                                newVisit.department_id === 'lab' ? 'Laboratory' :
+                                                newVisit.department_id === 'pharm' ? 'Pharmacy' : newVisit.department_id,
+                                    status: newVisit.status,
+                                    room_counter: newVisit.room_counter,
+                                    doctorName: null,
+                                    notes: newVisit.notes,
+                                    timestamp: newVisit.created_at
+                                };
+                                
+                                let nextToken = t;
+                                let updatedVisits;
+                                if (existingVisitIndex !== -1) {
+                                    // Replace the temporary visit with the DB confirmed visit
+                                    updatedVisits = (0, _toConsumableArray2.default)(t.visits);
+                                    updatedVisits[existingVisitIndex] = Object.assign({}, updatedVisits[existingVisitIndex], formattedVisit);
+                                } else {
+                                    // Append new visit
+                                    updatedVisits = [].concat(t.visits, [formattedVisit]);
+                                }
+                                updatedVisits.sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+                                nextToken = Object.assign({}, t, { visits: updatedVisits });
+                                
+                                if (prev.currentToken && prev.currentToken.id === t.id) {
+                                    // Force currentToken sync
+                                    setTimeout(() => {
+                                        setState(curr => Object.assign({}, curr, { currentToken: Object.assign({}, curr.currentToken, { visits: updatedVisits }) }));
+                                    }, 0);
+                                }
+                                
+                                return nextToken;
+                            }
+                            return t;
+                        })
+                    });
+                });
+            } else if (payload.eventType === 'UPDATE') {
+                const updatedVisit = payload.new;
+                setState(function(prev) {
+                    const newTokens = prev.tokens.map(function(t) {
+                        if (t.id === updatedVisit.token_id) {
+                            const updatedVisits = (t.visits || []).map(v => {
+                                if (v.id === updatedVisit.id) {
+                                    return Object.assign({}, v, {
+                                        status: updatedVisit.status,
+                                        room_counter: updatedVisit.room_counter,
+                                        notes: updatedVisit.notes
+                                    });
+                                }
+                                return v;
+                            });
+                            
+                            if (prev.currentToken && prev.currentToken.id === t.id) {
+                                setTimeout(() => {
+                                    setState(curr => Object.assign({}, curr, { currentToken: Object.assign({}, curr.currentToken, { visits: updatedVisits }) }));
+                                }, 0);
+                            }
+                            
+                            return Object.assign({}, t, { visits: updatedVisits });
+                        }
+                        return t;
+                    });
+                    return Object.assign({}, prev, { tokens: newTokens });
+                });
+            } else if (payload.eventType === 'DELETE') {
+                const deletedVisit = payload.old;
+                setState(function(prev) {
+                    return Object.assign({}, prev, {
+                        tokens: prev.tokens.map(function(t) {
+                            if (t.id === deletedVisit.token_id) {
+                                const updatedVisits = (t.visits || []).filter(v => v.id !== deletedVisit.id);
+                                if (prev.currentToken && prev.currentToken.id === t.id) {
+                                    setTimeout(() => {
+                                        setState(curr => Object.assign({}, curr, { currentToken: Object.assign({}, curr.currentToken, { visits: updatedVisits }) }));
+                                    }, 0);
+                                }
+                                return Object.assign({}, t, { visits: updatedVisits });
+                            }
+                            return t;
+                        })
+                    });
+                });
+            }
+        }).subscribe();
+        
+    return function() {
+        _supabaseClient.supabase.removeChannel(queueSubscription);
+        _supabaseClient.supabase.removeChannel(visitsChannel);
+    };
   }, []);
-
-  // Set up Supabase Realtime Subscription globally
-  (0, _react.useEffect)(function () {
-      var channel = _supabaseClient.supabase.channel('public:queue')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, function(payload) {
-              if (payload.eventType === 'INSERT') {
-                  if (payload.new && payload.new.token_data) {
-                      var newToken = deserializeTokens(JSON.stringify([payload.new.token_data]))[0];
-                      if (newToken) {
-                          newToken.id = payload.new.token_id;
-                          newToken.status = payload.new.status || newToken.status;
-                          newToken.room_counter = payload.new.room_counter || newToken.room_counter;
-                          newToken.booking_type = payload.new.booking_type || newToken.booking_type;
-                          newToken.visits = newToken.visits || [];
-                          
-                          setState(function(prev) {
-                              if (prev.tokens.find(function(t) { return t.id === newToken.id; })) return prev;
-                              return Object.assign({}, prev, { tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens), [newToken]) });
-                          });
-                      }
-                  }
-              } else if (payload.eventType === 'UPDATE') {
-                  if (payload.new && payload.new.token_data) {
-                      setState(function(prev) {
-                          return Object.assign({}, prev, {
-                              tokens: prev.tokens.map(function(t) {
-                                  if (t.id === payload.new.token_id) {
-                                      var updatedToken = deserializeTokens(JSON.stringify([payload.new.token_data]))[0];
-                                      if (updatedToken) {
-                                          updatedToken.id = payload.new.token_id;
-                                          updatedToken.status = payload.new.status || updatedToken.status;
-                                          updatedToken.room_counter = payload.new.room_counter || updatedToken.room_counter;
-                                          updatedToken.booking_type = payload.new.booking_type || updatedToken.booking_type;
-                                          // preserve nested lists
-                                          updatedToken.visits = t.visits || [];
-                                          return updatedToken;
-                                      }
-                                  }
-                                  return t;
-                              })
-                          });
-                      });
-                  }
-              } else if (payload.eventType === 'DELETE') {
-                  if (payload.old) {
-                      setState(function(prev) {
-                          return Object.assign({}, prev, {
-                              tokens: prev.tokens.filter(function(t) { return t.id !== payload.old.token_id; })
-                          });
-                      });
-                  }
-              }
-          }).subscribe();
-
-      var visitsChannel = _supabaseClient.supabase.channel('public:queue_visits')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'queue_visits' }, function(payload) {
-              if (payload.eventType === 'INSERT') {
-                  const newVisit = payload.new;
-                  setState(function(prev) {
-                      return Object.assign({}, prev, {
-                          tokens: prev.tokens.map(function(t) {
-                              if (t.id === newVisit.token_id) {
-                                  t.visits = t.visits || [];
-                                  const existingVisitIndex = t.visits.findIndex(v => v.id === newVisit.id || (v.department_id === newVisit.department_id && String(v.id).startsWith('visit-')));
-                                  
-                                  const formattedVisit = {
-                                      id: newVisit.id,
-                                      department_id: newVisit.department_id,
-                                      department: newVisit.department_id === 'gen_med' ? 'General Medicine' : 
-                                                  newVisit.department_id === 'cardio' ? 'Cardiology' :
-                                                  newVisit.department_id === 'ent' ? 'ENT' :
-                                                  newVisit.department_id === 'ortho' ? 'Orthopedics' :
-                                                  newVisit.department_id === 'lab' ? 'Laboratory' :
-                                                  newVisit.department_id === 'pharm' ? 'Pharmacy' : newVisit.department_id,
-                                      status: newVisit.status,
-                                      room_counter: newVisit.room_counter,
-                                      doctorName: null,
-                                      notes: newVisit.notes,
-                                      timestamp: newVisit.created_at
-                                  };
-                                  
-                                  let nextToken = t;
-                                  let updatedVisits;
-                                  if (existingVisitIndex !== -1) {
-                                      // Replace the temporary visit with the DB confirmed visit
-                                      updatedVisits = (0, _toConsumableArray2.default)(t.visits);
-                                      updatedVisits[existingVisitIndex] = Object.assign({}, updatedVisits[existingVisitIndex], formattedVisit);
-                                  } else {
-                                      // Append new visit
-                                      updatedVisits = [].concat(t.visits, [formattedVisit]);
-                                  }
-                                  updatedVisits.sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
-                                  nextToken = Object.assign({}, t, { visits: updatedVisits });
-                                  
-                                  if (prev.currentToken && prev.currentToken.id === t.id) {
-                                      // Force currentToken sync
-                                      setTimeout(() => {
-                                          setState(curr => Object.assign({}, curr, { currentToken: Object.assign({}, curr.currentToken, { visits: updatedVisits }) }));
-                                      }, 0);
-                                  }
-                                  
-                                  return nextToken;
-                              }
-                              return t;
-                          })
-                      });
-                  });
-              } else if (payload.eventType === 'UPDATE') {
-                  const updatedVisit = payload.new;
-                  setState(function(prev) {
-                      const newTokens = prev.tokens.map(function(t) {
-                          if (t.id === updatedVisit.token_id) {
-                              const updatedVisits = (t.visits || []).map(v => {
-                                  if (v.id === updatedVisit.id) {
-                                      return Object.assign({}, v, {
-                                          status: updatedVisit.status,
-                                          room_counter: updatedVisit.room_counter,
-                                          notes: updatedVisit.notes
-                                      });
-                                  }
-                                  return v;
-                              });
-                              
-                              if (prev.currentToken && prev.currentToken.id === t.id) {
-                                  setTimeout(() => {
-                                      setState(curr => Object.assign({}, curr, { currentToken: Object.assign({}, curr.currentToken, { visits: updatedVisits }) }));
-                                  }, 0);
-                              }
-                              
-                              return Object.assign({}, t, { visits: updatedVisits });
-                          }
-                          return t;
-                      });
-                      return Object.assign({}, prev, { tokens: newTokens });
-                  });
-              } else if (payload.eventType === 'DELETE') {
-                  const deletedVisit = payload.old;
-                  setState(function(prev) {
-                      return Object.assign({}, prev, {
-                          tokens: prev.tokens.map(function(t) {
-                              if (t.id === deletedVisit.token_id) {
-                                  const updatedVisits = (t.visits || []).filter(v => v.id !== deletedVisit.id);
-                                  if (prev.currentToken && prev.currentToken.id === t.id) {
-                                      setTimeout(() => {
-                                          setState(curr => Object.assign({}, curr, { currentToken: Object.assign({}, curr.currentToken, { visits: updatedVisits }) }));
-                                      }, 0);
-                                  }
-                                  return Object.assign({}, t, { visits: updatedVisits });
-                              }
-                              return t;
-                          })
-                      });
-                  });
-              }
-          }).subscribe();
-
-      return function() {
-          _supabaseClient.supabase.removeChannel(channel);
-          _supabaseClient.supabase.removeChannel(visitsChannel);
-      };
-  }, []);
-
 
   // Sync patient info from authenticated user
   (0, _react.useEffect)(
@@ -629,16 +553,6 @@ function AppContent() {
       saveInfo();
     },
     [state.patientInfo],
-  );
-
-  // Save language preference
-  (0, _react.useEffect)(
-    function () {
-      if (state.language) {
-        _asyncStorage.default.setItem("hospital-language", state.language).catch(console.error);
-      }
-    },
-    [state.language],
   );
 
   // Apply theme changes
@@ -909,25 +823,6 @@ function AppContent() {
           _DisabledUserFlow.DisabledUserFlow,
           {},
         );
-      case "kiosk-welcome":
-      case "kiosk-service":
-      case "kiosk-department":
-      case "kiosk-confirm":
-      case "kiosk-token":
-        return /*#__PURE__*/ (0, _jsxRuntime.jsx)(
-          _KioskFlow.KioskFlow,
-          {},
-        );
-      case "public-display":
-        return /*#__PURE__*/ (0, _jsxRuntime.jsx)(
-          _PublicDisplay.PublicDisplay,
-          {},
-        );
-      case "operations-summary":
-        return /*#__PURE__*/ (0, _jsxRuntime.jsx)(
-          _OperationsSummary.OperationsSummary,
-          {},
-        );
       case "token":
         return /*#__PURE__*/ (0, _jsxRuntime.jsx)(_TokenDisplay.TokenDisplay, {
           token: state.currentToken,
@@ -1093,11 +988,6 @@ function AppContent() {
                   children: renderCurrentView(),
                 }),
 
-            state.currentView !== 'public-display' && !state.currentView?.startsWith('kiosk') &&
-              /*#__PURE__*/ (0, _jsxRuntime.jsx)(
-                _AgenticChatbot.AgenticChatbot,
-                {},
-              ) /*#__PURE__*/,
             (0, _jsxRuntime.jsx)(_sonnerNative.Toaster, {}),
           ],
         },
