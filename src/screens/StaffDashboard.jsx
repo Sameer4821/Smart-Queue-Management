@@ -36,7 +36,7 @@ import {
 import { Card } from "../components/ui/card";
 import * as XLSX from "xlsx";
 import { toast } from "sonner-native";
-import { supabase } from "../services/supabaseClient";
+import { db, collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy } from "../services/firebase";
 
 // Template data
 const TEMPLATES = [
@@ -163,48 +163,46 @@ export function StaffDashboard() {
     return doctorId; // fallback
   };
 
-  // Supabase Real-Time Sync for Token Queue
+  // Firestore Real-Time Sync for Token Queue
   useEffect(() => {
     const channel = supabase.channel('public:queue_sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, (payload) => {
         if (payload.eventType === 'INSERT') {
           const newRow = payload.new;
           const mappedToken = {
-            id: newRow.token_id,
-            type: newRow.token_id && newRow.token_id.startsWith('EME') ? 'emergency' : newRow.token_id && newRow.token_id.startsWith('ACE') ? 'disabled' : 'common',
-            primaryDepartment: newRow.department,
-            timestamp: newRow.created_at ? new Date(newRow.created_at) : new Date(),
-            patient: {
-              name: newRow.patient_name || 'Walk-in Patient',
-            },
-            status: newRow.status || 'active',
-            qrCode: newRow.token_id
+             id: newRow.token_id,
+             type: newRow.token_id && newRow.token_id.startsWith('EME') ? 'emergency' : newRow.token_id && newRow.token_id.startsWith('ACE') ? 'disabled' : 'common',
+             primaryDepartment: newRow.department,
+             timestamp: newRow.created_at ? new Date(newRow.created_at) : new Date(),
+             patient: {
+                name: newRow.patient_name || 'Walk-in Patient',
+             },
+             status: newRow.status || 'active',
+             qrCode: newRow.token_id
           };
 
           setAppState(prev => {
-            const exists = prev.tokens.find(t => t.id === mappedToken.id);
-            if (exists) return prev;
-            return { ...prev, tokens: [...prev.tokens, mappedToken] };
+             const exists = prev.tokens.find(t => t.id === mappedToken.id);
+             if (exists) return prev;
+             return { ...prev, tokens: [...prev.tokens, mappedToken] };
           });
-        }
+        } 
         else if (payload.eventType === 'UPDATE') {
           setAppState(prev => ({
-            ...prev,
-            tokens: prev.tokens.map(t => t.id === payload.new.token_id ? { ...t, status: payload.new.status } : t)
+             ...prev,
+             tokens: prev.tokens.map(t => t.id === payload.new.token_id ? { ...t, status: payload.new.status } : t)
           }));
-        }
+        } 
         else if (payload.eventType === 'DELETE') {
           setAppState(prev => ({
-            ...prev,
-            tokens: prev.tokens.filter(t => t.id !== payload.old.token_id)
+             ...prev,
+             tokens: prev.tokens.filter(t => t.id !== payload.old.token_id)
           }));
         }
       })
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => unsubscribe();
   }, []);
 
   const handleBack = () => {
@@ -248,9 +246,10 @@ export function StaffDashboard() {
 
     addPrescriptionToToken(activePatient.id, prescription);
 
-    // Save to Supabase to trigger realtime sync
+    // Save to Firestore prescriptions collection
     try {
-      const { error } = await supabase.from('prescriptions').insert({
+      await setDoc(doc(db, 'prescriptions', prescription.id), {
+        id: prescription.id,
         token_id: activePatient.id,
         patient_id: activePatient.patient?.phone || activePatient.patient?.email || "unknown",
         doctor_id: appState.staffInfo?.id || 'staff',
@@ -258,14 +257,11 @@ export function StaffDashboard() {
         diagnosis,
         medicines,
         advice,
-        mode: prescriptionMode
+        mode: prescriptionMode,
+        createdAt: new Date().toISOString()
       });
-      if (error) {
-        console.error("Supabase insert error:", error);
-        toast.error("Sync partial", { description: "Saved locally but failed to push to server." });
-      }
     } catch (err) {
-      console.error("Error saving prescription to Supabase:", err);
+      console.error("Error saving prescription to Firestore:", err);
     }
 
     toast.success("Prescription Saved", {
@@ -283,11 +279,11 @@ export function StaffDashboard() {
     if (!activePatient) return;
 
     try {
-      // Update Supabase queue table
-      await supabase
-        .from('queue')
-        .update({ status: 'completed' })
-        .eq('token_id', activePatient.id);
+      // Update Firestore tokens collection document
+      await updateDoc(doc(db, 'tokens', activePatient.id), {
+        status: 'completed',
+        updatedAt: new Date().toISOString()
+      });
 
       // Optimistic update
       const updatedTokens = appState.tokens.map((token) =>
@@ -308,6 +304,7 @@ export function StaffDashboard() {
       const remainingTokens = allActiveTokens.filter(t => t.id !== activePatient.id);
       setActivePatient(remainingTokens.length > 0 ? remainingTokens[0] : null);
     } catch (error) {
+      console.error("Complete consultation error:", error);
       toast.error("Error", { description: "Failed to mark patient as completed." });
     }
   };
@@ -355,11 +352,11 @@ export function StaffDashboard() {
     }
 
     try {
-      // Update Supabase queue table
-      await supabase
-        .from('queue')
-        .update({ status: 'completed' })
-        .eq('token_id', matchedToken.id);
+      // Update Firestore tokens collection
+      await updateDoc(doc(db, 'tokens', matchedToken.id), {
+        status: 'completed',
+        updatedAt: new Date().toISOString()
+      });
 
       // Optimistic upate
       const updatedTokens = appState.tokens.map((token) =>

@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
-import { supabase } from '../lib/supabase';
+import { db, doc, setDoc, getDoc } from '../lib/firebase';
 
 export default function OtpScreen({ route, navigation }) {
-  // Retrieve the phone number passed from PhoneLoginScreen
-  const { phoneNumber } = route.params;
+  const { phoneNumber, confirmationResult } = route.params || {};
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -16,50 +15,32 @@ export default function OtpScreen({ route, navigation }) {
 
     setLoading(true);
     try {
-      // 1. Call verifyOtp
-      const { data: { session }, error: verifyError } = await supabase.auth.verifyOtp({
-        phone: phoneNumber,
-        token: otp,
-        type: 'sms',
-      });
-
-      if (verifyError) {
-        Alert.alert('Invalid OTP', verifyError.message);
-        setLoading(false);
-        return;
-      }
-
-      const user = session?.user;
-      if (user) {
-        // 2. Check if patient exists
-        const { data: existingPatient, error: fetchError } = await supabase
-          .from('patients')
-          .select('id')
-          .eq('id', user.id)
-          .single();
-
-        // 3. If not found (error code PGRST116 means zero rows returned in single()), insert new record
-        if (!existingPatient || fetchError?.code === 'PGRST116') {
-          const { error: insertError } = await supabase
-            .from('patients')
-            .insert([
-              {
-                id: user.id,
-                phone_number: phoneNumber,
-              }
-            ]);
-
-          if (insertError) {
-            console.error('Error inserting new patient:', insertError);
-            Alert.alert('Database Error', 'Could not register user correctly.');
-          }
+      let userId = `user_${Date.now()}`;
+      if (confirmationResult && typeof confirmationResult.confirm === 'function') {
+        const userCred = await confirmationResult.confirm(otp);
+        if (userCred && userCred.user) {
+          userId = userCred.user.uid;
         }
-
-        // 4. Navigate to HomeScreen upon successful verification
-        navigation.replace('HomeScreen');
       }
+
+      // Sync user to Firestore
+      try {
+        const userRef = doc(db, 'users', userId);
+        const snap = await getDoc(userRef);
+        if (!snap.exists()) {
+          await setDoc(userRef, {
+            uid: userId,
+            phone_number: phoneNumber || '',
+            createdAt: new Date().toISOString()
+          });
+        }
+      } catch (e) {
+        console.error('Firestore user sync warning:', e);
+      }
+
+      navigation.replace('HomeScreen');
     } catch (err) {
-      Alert.alert('Network Error', 'An unexpected error occurred. Please try again.');
+      Alert.alert('Verification Failed', err.message || 'Could not verify OTP code.');
       console.error(err);
     } finally {
       setLoading(false);

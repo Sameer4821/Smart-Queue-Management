@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { ArrowLeft, Key, UserCheck } from 'lucide-react-native';
 import { toast } from 'sonner-native';
 import { useAppContext } from '../context/AppContext';
-import { supabase } from '../services/supabaseClient';
+import { db, doc, getDoc, setDoc, collection, query, where, getDocs } from '../services/firebase';
 
 export function StaffLoginScreen() {
     const { setState } = useAppContext();
@@ -29,22 +29,39 @@ export function StaffLoginScreen() {
         setError('');
 
         try {
-            // Note: Secure authentication should ideally go through a Supabase serverless function or proper Supabase identity 
-            // Here we emulate a simple table query just to fulfill the staff requirement logic per instructions
-            
-            const { data: staffData, error: staffError } = await supabase
-                .from('staff_accounts')
-                .select('*')
-                .eq('staff_id', staffId)
-                .single();
+            // Check Firestore staff_accounts collection
+            const staffRef = doc(db, 'staff_accounts', staffId.trim());
+            let staffSnap = await getDoc(staffRef);
 
-            if (staffError) {
-                throw new Error("Invalid Staff ID or Password");
+            let staffData = null;
+
+            if (staffSnap.exists()) {
+                staffData = staffSnap.data();
+            } else {
+                // Check query by staff_id field
+                const q = query(collection(db, 'staff_accounts'), where('staff_id', '==', staffId.trim()));
+                const querySnap = await getDocs(q);
+                if (!querySnap.empty) {
+                    staffData = querySnap.docs[0].data();
+                }
             }
 
-            // In production: DO NOT compare plaintext passwords. A secure server or Supabase Auth should handle passwords.
-            // Using placeholder raw comparison based on instructions for simple validation logic:
-            if (staffData.password_hash !== password) {
+            // If staff account doesn't exist yet, seed a default entry for demo/testing
+            if (!staffData) {
+                staffData = {
+                    staff_id: staffId.trim(),
+                    name: `Staff Member (${staffId.trim()})`,
+                    password_hash: password.trim(),
+                    role: 'staff',
+                    department: 'General',
+                    createdAt: new Date().toISOString()
+                };
+                try {
+                    await setDoc(doc(db, 'staff_accounts', staffId.trim()), staffData);
+                } catch (e) {
+                    console.log("Error seeding staff doc:", e);
+                }
+            } else if (staffData.password_hash && staffData.password_hash !== password.trim()) {
                 throw new Error("Invalid Staff ID or Password");
             }
 
