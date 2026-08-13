@@ -28,3 +28,32 @@ CREATE POLICY "Staff can view own record" ON staff_accounts FOR SELECT USING (au
 -- Optionally insert an admin staff account for testing (password 'admin123', hashed using bcrypt/pgcrypto ideally)
 -- Note: actual password hashing should be handled through Supabase auth or a server API, this is just arbitrary if you want a raw login
 -- INSERT INTO staff_accounts (staff_id, password_hash, role) VALUES ('admin', 'admin123_hash_placeholder', 'admin');
+
+-- Create emergency_alerts table (separate from queue — emergency patients do NOT create queue entries)
+CREATE TABLE IF NOT EXISTS emergency_alerts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    alert_id TEXT UNIQUE NOT NULL,
+    patient_name TEXT NOT NULL,
+    patient_age INTEGER,
+    patient_gender TEXT,
+    contact_number TEXT,
+    emergency_type TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK (severity IN ('critical', 'urgent', 'moderate')),
+    condition_details TEXT,
+    arrival_method TEXT CHECK (arrival_method IN ('ambulance', 'own_transport', 'already_here')),
+    estimated_arrival TEXT,
+    assistance_needed TEXT[] DEFAULT '{}',
+    alert_status TEXT DEFAULT 'new' CHECK (alert_status IN ('new', 'acknowledged', 'in_progress', 'resolved')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    acknowledged_by TEXT,
+    acknowledged_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Enable RLS for emergency_alerts
+ALTER TABLE emergency_alerts ENABLE ROW LEVEL SECURITY;
+-- Allow all authenticated users to insert (patients submitting alerts)
+CREATE POLICY "Anyone can insert emergency alerts" ON emergency_alerts FOR INSERT WITH CHECK (true);
+-- Allow all authenticated users to view (staff viewing alerts)
+CREATE POLICY "Anyone can view emergency alerts" ON emergency_alerts FOR SELECT USING (true);
+-- Allow staff to update alert status
+CREATE POLICY "Anyone can update emergency alerts" ON emergency_alerts FOR UPDATE USING (true);
