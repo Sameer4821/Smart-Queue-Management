@@ -7,9 +7,11 @@ import { Phone, ArrowLeft, User } from 'lucide-react-native';
 import { toast } from 'sonner-native';
 import { useAppContext } from '../context/AppContext';
 import { supabase } from '../services/supabaseClient';
+import { useTranslation } from '../hooks/useTranslation';
 
 export function PatientRegistrationScreen() {
     const { setState } = useAppContext();
+    const { t } = useTranslation();
     const [phone, setPhone] = useState('');
     const [loading, setLoading] = useState(false);
     const [phoneError, setPhoneError] = useState('');
@@ -25,10 +27,10 @@ export function PatientRegistrationScreen() {
 
     const handleSubmit = async () => {
         if (!phone.trim()) {
-            setPhoneError('Mobile number is required');
+            setPhoneError(t('regMobileRequired'));
             return;
         } else if (!validatePhone(phone)) {
-            setPhoneError('Invalid mobile number');
+            setPhoneError(t('regInvalidMobile'));
             return;
         }
 
@@ -45,7 +47,7 @@ export function PatientRegistrationScreen() {
 
             if (error) throw error;
 
-            toast.success('OTP sent to your mobile number');
+            toast.success(t('regOtpSent'));
             setState(prev => ({
                 ...prev,
                 pendingRegistrationPhone: formattedPhone,
@@ -53,7 +55,7 @@ export function PatientRegistrationScreen() {
             }));
         } catch (error) {
             console.error('OTP Send Error:', error);
-            toast.error(error.message || 'Failed to send OTP. Please try again.');
+            toast.error(error.message || t('regOtpFailed'));
         } finally {
             setLoading(false);
         }
@@ -68,8 +70,8 @@ export function PatientRegistrationScreen() {
                             <ArrowLeft size={20} color="#374151" />
                         </TouchableOpacity>
                         <View style={{ flex: 1 }}>
-                            <Text style={styles.title}>Patient Registration</Text>
-                            <Text style={styles.subtitle}>Enter your details to proceed</Text>
+                            <Text style={styles.title}>{t('regTitle')}</Text>
+                            <Text style={styles.subtitle}>{t('regSubtitle')}</Text>
                         </View>
                     </View>
 
@@ -77,18 +79,18 @@ export function PatientRegistrationScreen() {
                         <CardHeader>
                             <View style={styles.rowCentered}>
                                 <User size={20} color="#111827" style={{ marginRight: 8 }} />
-                                <CardTitle>Personal Info</CardTitle>
+                                <CardTitle>{t('regPersonalInfo')}</CardTitle>
                             </View>
                         </CardHeader>
                         <CardContent>
                             <View style={styles.inputGroup}>
                                 <View style={styles.labelRow}>
                                     <Phone size={16} color="#374151" style={{ marginRight: 4 }} />
-                                    <Text style={styles.label}>Mobile Number *</Text>
+                                    <Text style={styles.label}>{t('regMobileNumber')}</Text>
                                 </View>
                                 <TextInput
                                     style={[styles.input, phoneError && styles.inputError]}
-                                    placeholder="Enter 10 digit mobile number"
+                                    placeholder={t('regEnterMobile')}
                                     value={phone}
                                     onChangeText={(val) => {
                                         setPhone(val);
@@ -101,16 +103,16 @@ export function PatientRegistrationScreen() {
                                 {phoneError ? <Text style={styles.errorText}>{phoneError}</Text> : null}
                             </View>
 
-                            <Button 
-                                onPress={handleSubmit} 
-                                disabled={loading || !phone.trim()} 
+                            <Button
+                                onPress={handleSubmit}
+                                disabled={loading || !phone.trim()}
                                 style={{ marginTop: 16 }}>
                                 <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>
-                                    {loading ? 'Sending OTP...' : 'Continue'}
+                                    {loading ? t('regSendingOtp') : t('regContinue')}
                                 </Text>
                             </Button>
 
-                            <Button 
+                            <Button
                                 onPress={() => {
                                     setState(prev => ({
                                         ...prev,
@@ -124,7 +126,7 @@ export function PatientRegistrationScreen() {
                                 }}
                                 style={{ marginTop: 16, backgroundColor: '#10b981' }}>
                                 <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>
-                                    Skip Login (Dev)
+                                    {t('regSkipLogin')}
                                 </Text>
                             </Button>
                         </CardContent>

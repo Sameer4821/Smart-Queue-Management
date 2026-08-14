@@ -7,9 +7,11 @@ import { ArrowLeft, Key, UserCheck } from 'lucide-react-native';
 import { toast } from 'sonner-native';
 import { useAppContext } from '../context/AppContext';
 import { supabase } from '../services/supabaseClient';
+import { useTranslation } from '../hooks/useTranslation';
 
 export function StaffLoginScreen() {
     const { setState } = useAppContext();
+    const { t } = useTranslation();
     const [staffId, setStaffId] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
@@ -21,7 +23,7 @@ export function StaffLoginScreen() {
 
     const handleLogin = async () => {
         if (!staffId.trim() || !password.trim()) {
-            setError('Both Staff ID and Password are required');
+            setError(t('staffBothRequired'));
             return;
         }
 
@@ -31,7 +33,7 @@ export function StaffLoginScreen() {
         try {
             // Note: Secure authentication should ideally go through a Supabase serverless function or proper Supabase identity 
             // Here we emulate a simple table query just to fulfill the staff requirement logic per instructions
-            
+
             const { data: staffData, error: staffError } = await supabase
                 .from('staff_accounts')
                 .select('*')
@@ -39,17 +41,17 @@ export function StaffLoginScreen() {
                 .single();
 
             if (staffError) {
-                throw new Error("Invalid Staff ID or Password");
+                throw new Error(t('staffLoginFailed'));
             }
 
             // In production: DO NOT compare plaintext passwords. A secure server or Supabase Auth should handle passwords.
             // Using placeholder raw comparison based on instructions for simple validation logic:
             if (staffData.password_hash !== password) {
-                throw new Error("Invalid Staff ID or Password");
+                throw new Error(t('staffLoginFailed'));
             }
 
-            toast.success('Staff Login Successful');
-            
+            toast.success(t('staffLoginSuccess'));
+
             // Allow access to staff dashboard
             setState(prev => ({
                 ...prev,
@@ -59,8 +61,8 @@ export function StaffLoginScreen() {
 
         } catch (error) {
             console.error('Staff Login Error:', error);
-            setError(error.message || 'Login failed. Please verify your credentials.');
-            toast.error(error.message || 'Login failed.');
+            setError(error.message || t('staffLoginFailed'));
+            toast.error(error.message || t('staffLoginFailed'));
         } finally {
             setLoading(false);
         }
@@ -80,15 +82,15 @@ export function StaffLoginScreen() {
                         <CardHeader>
                             <View style={styles.rowCentered}>
                                 <UserCheck size={24} color="#0f172a" style={{ marginRight: 8 }} />
-                                <CardTitle>Staff Portal Login</CardTitle>
+                                <CardTitle>{t('staffPortalLogin')}</CardTitle>
                             </View>
                         </CardHeader>
                         <CardContent>
                             <View style={styles.inputGroup}>
-                                <Text style={styles.label}>Staff ID</Text>
+                                <Text style={styles.label}>{t('staffId')}</Text>
                                 <TextInput
                                     style={styles.input}
-                                    placeholder="Enter your Staff ID"
+                                    placeholder={t('staffEnterStaffId')}
                                     value={staffId}
                                     onChangeText={(val) => {
                                         setStaffId(val);
@@ -100,10 +102,10 @@ export function StaffLoginScreen() {
                             </View>
 
                             <View style={styles.inputGroup}>
-                                <Text style={styles.label}>Password</Text>
+                                <Text style={styles.label}>{t('staffPassword')}</Text>
                                 <TextInput
                                     style={styles.input}
-                                    placeholder="Enter your password"
+                                    placeholder={t('staffEnterPassword')}
                                     value={password}
                                     onChangeText={(val) => {
                                         setPassword(val);
@@ -116,19 +118,19 @@ export function StaffLoginScreen() {
 
                             {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-                            <Button 
-                                onPress={handleLogin} 
-                                disabled={loading || !staffId.trim() || !password.trim()} 
+                            <Button
+                                onPress={handleLogin}
+                                disabled={loading || !staffId.trim() || !password.trim()}
                                 style={{ marginTop: 24, paddingVertical: 14 }}>
                                 <View style={styles.btnContent}>
                                     <Key size={18} color="#fff" style={{ marginRight: 8 }} />
                                     <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>
-                                        {loading ? 'Authenticating...' : 'Secure Login'}
+                                        {loading ? t('staffAuthenticating') : t('staffSecureLogin')}
                                     </Text>
                                 </View>
                             </Button>
 
-                            <Button 
+                            <Button
                                 onPress={() => {
                                     setState(prev => ({
                                         ...prev,
@@ -139,7 +141,7 @@ export function StaffLoginScreen() {
                                 style={{ marginTop: 12, paddingVertical: 14, backgroundColor: '#94a3b8' }}>
                                 <View style={styles.btnContent}>
                                     <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>
-                                        Temporary Bypass (Skip Login)
+                                        {t('staffBypassLogin')}
                                     </Text>
                                 </View>
                             </Button>

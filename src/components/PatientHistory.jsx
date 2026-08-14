@@ -4,11 +4,22 @@ import { ArrowLeft, History, FileText, FlaskConical } from 'lucide-react-native'
 import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
 import { Badge } from './ui/badge';
 import { useAppContext } from '../context/AppContext';
+import { useTranslation } from '../hooks/useTranslation';
 
 export function PatientHistory({ onBack }) {
     const { state } = useAppContext();
+    const { t } = useTranslation();
 
-    const patientTokens = state.tokens.filter(tok => 
+    const getPriorityLabel = (type) => {
+        switch (type?.toLowerCase()) {
+            case 'emergency': return t('emgEmergency') || 'Emergency';
+            case 'disabled': return t('lpAccessibility') || 'Accessibility';
+            case 'common': return t('lpNormal') || 'Normal';
+            default: return type;
+        }
+    };
+
+    const patientTokens = state.tokens.filter(tok =>
         (tok.patient?.phone && state.patientInfo?.phone && tok.patient.phone === state.patientInfo.phone) ||
         (tok.patient?.email && state.patientInfo?.email && tok.patient.email === state.patientInfo.email)
     );
@@ -34,15 +45,15 @@ export function PatientHistory({ onBack }) {
                 <TouchableOpacity onPress={onBack} style={styles.backButton}>
                     <ArrowLeft size={24} color="#1e3a8a" />
                 </TouchableOpacity>
-                <Text style={styles.title}>Patient History</Text>
+                <Text style={styles.title}>{t('phTitle') || "Patient History"}</Text>
             </View>
 
             {sortedTokens.length === 0 ? (
                 <Card style={styles.card}>
                     <CardContent style={styles.emptyContent}>
                         <History size={48} color="#9ca3af" style={{ marginBottom: 16 }} />
-                        <Text style={styles.emptyText}>No medical history found.</Text>
-                        <Text style={styles.emptySubtext}>Your past consultations and treatments will appear here.</Text>
+                        <Text style={styles.emptyText}>{t('phEmpty') || "No medical history found."}</Text>
+                        <Text style={styles.emptySubtext}>{t('phEmptySub') || "Your past consultations and treatments will appear here."}</Text>
                     </CardContent>
                 </Card>
             ) : (
@@ -56,12 +67,12 @@ export function PatientHistory({ onBack }) {
                             <View style={{ alignItems: 'flex-end', gap: 4 }}>
                                 <Badge variant="outline" style={{ backgroundColor: token.type === 'emergency' ? '#fee2e2' : '#f3f4f6' }}>
                                     <Text style={{ color: token.type === 'emergency' ? '#dc2626' : '#374151', textTransform: 'capitalize' }}>
-                                        {token.type}
+                                        {getPriorityLabel(token.type)}
                                     </Text>
                                 </Badge>
                                 {token.status === 'active' && (
                                     <Badge style={{ backgroundColor: '#eff6ff' }}>
-                                        <Text style={{ color: '#2563eb', fontSize: 10 }}>ACTIVE</Text>
+                                        <Text style={{ color: '#2563eb', fontSize: 10 }}>{t('phActive') || "ACTIVE"}</Text>
                                     </Badge>
                                 )}
                             </View>
@@ -69,19 +80,19 @@ export function PatientHistory({ onBack }) {
                         <CardContent>
                             {token.patient && (
                                 <View style={styles.section}>
-                                    <Text style={styles.sectionTitle}>Patient Details</Text>
-                                    <Text style={styles.sectionText}>Name: {token.patient.name}</Text>
+                                    <Text style={styles.sectionTitle}>{t('phPatientDetails') || "Patient Details"}</Text>
+                                    <Text style={styles.sectionText}>{t('phName') || "Name: "}{token.patient.name}</Text>
                                     <Text style={styles.sectionText}>
-                                        Age: {token.patient.age} • Gender: {token.patient.gender}
+                                        {(t('phAgeGender') || "Age: {age} • Gender: {gender}").replace('{age}', token.patient.age).replace('{gender}', token.patient.gender)}
                                     </Text>
-                                    {token.patient.phone && <Text style={styles.sectionText}>Phone: {token.patient.phone}</Text>}
-                                    {token.patient.symptoms && <Text style={styles.sectionText}>Symptoms: {token.patient.symptoms}</Text>}
+                                    {token.patient.phone && <Text style={styles.sectionText}>{t('phPhone') || "Phone: "}{token.patient.phone}</Text>}
+                                    {token.patient.symptoms && <Text style={styles.sectionText}>{t('phSymptoms') || "Symptoms: "}{token.patient.symptoms}</Text>}
                                 </View>
                             )}
 
                             {token.notes && (
                                 <View style={styles.section}>
-                                    <Text style={styles.sectionTitle}>Consultation Notes</Text>
+                                    <Text style={styles.sectionTitle}>{t('phConsultationNotes') || "Consultation Notes"}</Text>
                                     <Text style={styles.sectionText}>{token.notes}</Text>
                                 </View>
                             )}
@@ -90,7 +101,7 @@ export function PatientHistory({ onBack }) {
                                 <View style={styles.section}>
                                     <View style={styles.sectionHeader}>
                                         <FileText size={16} color="#4b5563" style={{ marginRight: 8 }} />
-                                        <Text style={styles.sectionTitle}>Prescriptions</Text>
+                                        <Text style={styles.sectionTitle}>{t('phPrescriptions') || "Prescriptions"}</Text>
                                     </View>
                                     {token.prescriptions.map((px, i) => (
                                         <Text key={i} style={styles.listItem}>• {px}</Text>
@@ -102,7 +113,7 @@ export function PatientHistory({ onBack }) {
                                 <View style={styles.section}>
                                     <View style={styles.sectionHeader}>
                                         <FlaskConical size={16} color="#4b5563" style={{ marginRight: 8 }} />
-                                        <Text style={styles.sectionTitle}>Lab Tests</Text>
+                                        <Text style={styles.sectionTitle}>{t('phLabTests') || "Lab Tests"}</Text>
                                     </View>
                                     {token.labTests.map((test, i) => (
                                         <Text key={i} style={styles.listItem}>• {test}</Text>

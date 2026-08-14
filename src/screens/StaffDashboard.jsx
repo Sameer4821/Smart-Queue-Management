@@ -8,18 +8,22 @@ import {
   TextInput,
   Image,
   Dimensions,
-  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAppContext } from "../context/AppContext";
-import { supabase } from "../services/supabaseClient";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { translations } from "../translations/translations";
+import { useTranslation } from "../hooks/useTranslation";
+
 import {
   HeartPulse,
   Activity,
   Stethoscope,
   AlertCircle,
+  AlertTriangle,
+  Bell,
+  Clock,
+  Phone,
+  Truck,
   FilePlus2,
   FileText,
   CheckCircle2,
@@ -30,12 +34,11 @@ import {
   Upload,
   QrCode,
   Save,
-  Plus,
-  Volume2
+  Plus
 } from "lucide-react-native";
 import { Card } from "../components/ui/card";
 import { toast } from "sonner-native";
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../components/ui/select";
+import { supabase } from "../services/supabaseClient";
 
 // Template data
 const TEMPLATES = [
@@ -54,34 +57,47 @@ const QUICK_DOSAGE = ["1-0-1", "1-1-1", "0-0-1", "SOS"];
 
 export function StaffDashboard() {
   const { state: appState, setState: setAppState, addPrescriptionToToken } = useAppContext();
-  const t = translations[appState.language] || translations.en;
-  
+
+  // ─── EMERGENCY ALERTS ───
+  const severityOrder = { critical: 0, urgent: 1, moderate: 2 };
+  const emergencyAlerts = (appState.emergencyAlerts || [])
+    .filter(a => a.alert_status !== 'resolved')
+    .sort((a, b) => {
+      const sA = severityOrder[a.severity] !== undefined ? severityOrder[a.severity] : 3;
+      const sB = severityOrder[b.severity] !== undefined ? severityOrder[b.severity] : 3;
+      if (sA !== sB) return sA - sB;
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+  const { t } = useTranslation();
+
+
   // Camera permissions
   const [permission, requestPermission] = useCameraPermissions();
-  
-  // Sort queue by priority
+
+  // Sort queue strictly by priority
   const priorityMap = { emergency: 1, disabled: 2, common: 3 };
-  
-  const currentStaffDept = appState.staffInfo?.department || 'General Medicine';
-  const matchedDept = (appState.departments || []).find(d => d.name === currentStaffDept);
-  const staffDeptId = matchedDept ? matchedDept.id : 'gen_med';
 
   // All active tokens
-  const allActiveTokens = (appState.tokens || []).filter(t => {
-    // Find active visit for this department
-    const v = (t.visits || []).find(visit => visit.department_id === staffDeptId && (visit.status === 'waiting' || visit.status === 'called' || visit.status === 'in_consultation'));
-    return v !== undefined;
-  }).sort((a, b) => {
+  const allActiveTokens = (appState.tokens || []).filter(t => t.status === "active" || t.status === "waiting").sort((a, b) => {
+    const isAEmergency = a.type?.toLowerCase() === 'emergency' || a.primaryDepartment?.toLowerCase() === 'emergency';
+    const isBEmergency = b.type?.toLowerCase() === 'emergency' || b.primaryDepartment?.toLowerCase() === 'emergency';
+
+    // Ultimate first priority for Emergency
+    if (isAEmergency && !isBEmergency) return -1;
+    if (!isAEmergency && isBEmergency) return 1;
+
+    // Below them, sort by standard priority map or generation time
     const pA = priorityMap[a.type] || 3;
     const pB = priorityMap[b.type] || 3;
     if (pA !== pB) return pA - pB;
+
     return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
   });
 
   const [activePatient, setActivePatient] = useState(allActiveTokens.length > 0 ? allActiveTokens[0] : null);
-  
-  // Upcoming queue is the next 3 patients excluding active
-  const upcomingQueue = allActiveTokens.filter(t => t.id !== activePatient?.id).slice(0, 3);
+
+  // Upcoming queue is all other patients (Fully viewable instead of just 3)
+  const upcomingQueue = allActiveTokens.filter(t => t.id !== activePatient?.id);
   const totalWaiting = allActiveTokens.length;
 
   // Track prescription mode
@@ -91,26 +107,6 @@ export function StaffDashboard() {
   const [diagnosis, setDiagnosis] = useState("");
   const [medicines, setMedicines] = useState([]);
   const [advice, setAdvice] = useState("");
-  const [referralDeptId, setReferralDeptId] = useState("");
-
-  // Receptionist States
-  const [searchPhone, setSearchPhone] = useState("");
-  const [receptionPatient, setReceptionPatient] = useState({
-    name: "",
-    phone: "",
-    age: "",
-    gender: "unspecified",
-    type: "common",
-    primaryDepartment: "General Medicine",
-    assignedDoctor: ""
-  });
-  const [generatedKioskToken, setGeneratedKioskToken] = useState(null);
-  const [isSearching, setIsSearching] = useState(false);
-  const [receptionLoading, setReceptionLoading] = useState(false);
-  const receptionBookingInProgress = useRef(false);
-
-  // Processing state for action button protection
-  const [isProcessing, setIsProcessing] = useState(false);
 
   // QR Scanner State
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -125,9 +121,147 @@ export function StaffDashboard() {
     }
   }, [allActiveTokens]);
 
+  // Supabase Real-Time Sync for Token Queue
+  useEffect(() => {
+    const channel = supabase.channel('public:queue_sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newRow = payload.new;
+          const mappedToken = {
+            id: newRow.token_id,
+            type: newRow.token_id && newRow.token_id.startsWith('EME') ? 'emergency' : newRow.token_id && newRow.token_id.startsWith('ACE') ? 'disabled' : 'common',
+            primaryDepartment: newRow.department,
+            timestamp: newRow.created_at ? new Date(newRow.created_at) : new Date(),
+            patient: {
+              name: newRow.patient_name || 'Walk-in Patient',
+            },
+            status: newRow.status || 'active',
+            qrCode: newRow.token_id
+          };
+
+          setAppState(prev => {
+            const exists = prev.tokens.find(t => t.id === mappedToken.id);
+            if (exists) return prev;
+            return { ...prev, tokens: [...prev.tokens, mappedToken] };
+          });
+        }
+        else if (payload.eventType === 'UPDATE') {
+          setAppState(prev => ({
+            ...prev,
+            tokens: prev.tokens.map(t => t.id === payload.new.token_id ? { ...t, status: payload.new.status } : t)
+          }));
+        }
+        else if (payload.eventType === 'DELETE') {
+          setAppState(prev => ({
+            ...prev,
+            tokens: prev.tokens.filter(t => t.id !== payload.old.token_id)
+          }));
+        }
+      })
+      .subscribe();
+
+    // Also subscribe to emergency_alerts for realtime updates
+    const emergencyChannel = supabase.channel('staff:emergency_alerts')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'emergency_alerts' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setAppState(prev => {
+            const existing = prev.emergencyAlerts || [];
+            const exists = existing.find(a => a.alert_id === payload.new.alert_id);
+            if (exists) return prev;
+            toast.error(`🚨 New Emergency Alert`, {
+              description: `${payload.new.severity.toUpperCase()}: ${payload.new.emergency_type} - ${payload.new.patient_name}`,
+              duration: 10000,
+            });
+            return { ...prev, emergencyAlerts: [...existing, payload.new] };
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          setAppState(prev => ({
+            ...prev,
+            emergencyAlerts: (prev.emergencyAlerts || []).map(a =>
+              a.alert_id === payload.new.alert_id ? { ...a, ...payload.new } : a
+            )
+          }));
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+      supabase.removeChannel(emergencyChannel);
+    };
+  }, []);
+
   const handleBack = () => {
     setAppState((prev) => ({ ...prev, currentView: "portal" }));
   };
+
+  // ─── EMERGENCY ALERT ACTIONS ───
+  const handleAcknowledgeAlert = async (alertId) => {
+    try {
+      const staffName = appState.staffInfo?.name || 'Staff';
+      await supabase
+        .from('emergency_alerts')
+        .update({ alert_status: 'acknowledged', acknowledged_by: staffName, acknowledged_at: new Date().toISOString() })
+        .eq('alert_id', alertId);
+
+      setAppState(prev => ({
+        ...prev,
+        emergencyAlerts: (prev.emergencyAlerts || []).map(a =>
+          a.alert_id === alertId ? { ...a, alert_status: 'acknowledged', acknowledged_by: staffName, acknowledged_at: new Date().toISOString() } : a
+        )
+      }));
+      toast.success('Alert Acknowledged');
+    } catch (err) {
+      toast.error('Failed to acknowledge alert');
+    }
+  };
+
+  const handleUpdateAlertStatus = async (alertId, newStatus) => {
+    try {
+      await supabase
+        .from('emergency_alerts')
+        .update({ alert_status: newStatus })
+        .eq('alert_id', alertId);
+
+      setAppState(prev => ({
+        ...prev,
+        emergencyAlerts: (prev.emergencyAlerts || []).map(a =>
+          a.alert_id === alertId ? { ...a, alert_status: newStatus } : a
+        )
+      }));
+      toast.success(`Alert marked as ${newStatus.replace('_', ' ')}`);
+    } catch (err) {
+      toast.error('Failed to update alert status');
+    }
+  };
+
+  const getSeverityStyle = (severity) => {
+    if (severity === 'critical') return { bg: '#fef2f2', border: '#fca5a5', text: '#dc2626', label: (t('emgCritical') || 'critical').split(' ')[0].toUpperCase() };
+    if (severity === 'urgent') return { bg: '#fff7ed', border: '#fdba74', text: '#ea580c', label: (t('emgUrgent') || 'urgent').split(' ')[0].toUpperCase() };
+    return { bg: '#fefce8', border: '#fde047', text: '#ca8a04', label: (t('emgModerate') || 'moderate').split(' ')[0].toUpperCase() };
+  };
+
+  const getAlertStatusStyle = (status) => {
+    if (status === 'new') return { bg: '#dc2626', label: 'NEW' };
+    if (status === 'acknowledged') return { bg: '#2563eb', label: (t('staffAck') || 'ACKNOWLEDGED').toUpperCase() };
+    if (status === 'in_progress') return { bg: '#ea580c', label: (t('staffInProgress') || 'IN PROGRESS').toUpperCase() };
+    return { bg: '#16a34a', label: (t('staffResolve') || 'RESOLVED').toUpperCase() };
+  };
+
+
+  const formatAlertTime = (dateStr) => {
+    if (!dateStr) return '--';
+    const d = new Date(dateStr);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const getArrivalLabel = (method) => {
+    if (method === 'ambulance') return '🚑 ' + t('emgAmbulance');
+    if (method === 'own_transport') return '🚗 ' + t('emgOwnTransport');
+    if (method === 'already_here') return '🏥 ' + t('emgAlreadyHere');
+    return '--';
+  };
+
 
   const toggleLanguage = () => {
     setAppState((prev) => ({
@@ -152,7 +286,7 @@ export function StaffDashboard() {
     setMedicines(updated);
   };
 
-  const handleSavePrescription = () => {
+  const handleSavePrescription = async () => {
     if (!activePatient) return;
 
     const prescription = {
@@ -165,7 +299,27 @@ export function StaffDashboard() {
     };
 
     addPrescriptionToToken(activePatient.id, prescription);
-    
+
+    // Save to Supabase to trigger realtime sync
+    try {
+      const { error } = await supabase.from('prescriptions').insert({
+        token_id: activePatient.id,
+        patient_id: activePatient.patient?.phone || activePatient.patient?.email || "unknown",
+        doctor_id: appState.staffInfo?.id || 'staff',
+        department: activePatient.primaryDepartment,
+        diagnosis,
+        medicines,
+        advice,
+        mode: prescriptionMode
+      });
+      if (error) {
+        console.error("Supabase insert error:", error);
+        toast.error("Sync partial", { description: "Saved locally but failed to push to server." });
+      }
+    } catch (err) {
+      console.error("Error saving prescription to Supabase:", err);
+    }
+
     toast.success("Prescription Saved", {
       description: "Available in patient records.",
     });
@@ -177,463 +331,33 @@ export function StaffDashboard() {
     setAdvice("");
   };
 
-  // Receptionist Handlers
-  const handleSearchPatient = async () => {
-    if (!searchPhone.trim()) {
-      toast.error("Please enter a phone number to search");
-      return;
-    }
-    setIsSearching(true);
-    try {
-      const { data, error } = await supabase
-        .from('queue')
-        .select('*')
-        .eq('patient_phone', searchPhone)
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      if (error) throw error;
-
-      if (data && data.length > 0) {
-        const match = data[0];
-        setReceptionPatient(prev => ({
-          ...prev,
-          name: match.patient_name || "",
-          phone: match.patient_phone || searchPhone,
-          age: match.patient_age ? String(match.patient_age) : "",
-          gender: match.patient_gender || "unspecified"
-        }));
-        toast.success("Patient found!", { description: `Loaded details for ${match.patient_name}.` });
-      } else {
-        toast.error("No record found. Please enter details manually.");
-        setReceptionPatient(prev => ({
-          ...prev,
-          phone: searchPhone,
-          name: "",
-          age: "",
-          gender: "unspecified"
-        }));
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error("Search failed");
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  const handleReceptionGenerateToken = async () => {
-    if (receptionBookingInProgress.current || receptionLoading) return;
-    if (!receptionPatient.name.trim()) {
-      toast.error("Patient Name is required");
-      return;
-    }
-    if (!receptionPatient.phone.trim()) {
-      toast.error("Phone Number is required");
-      return;
-    }
-
-    receptionBookingInProgress.current = true;
-    setReceptionLoading(true);
-    const now = new Date();
-    const scheduledTime = now;
-    
-    // Calculate incremental token number locally
-    const typeTokens = appState.tokens.filter(t => t.type === receptionPatient.type);
-    const tokenNumber = String(typeTokens.length + 1).padStart(3, '0');
-    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-    const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '');
-    
-    const prefix = receptionPatient.type === 'emergency' ? 'EME' : receptionPatient.type === 'disabled' ? 'ACE' : 'GEN';
-    const tokenId = `${prefix}-${timeStr}-${tokenNumber}`;
-    const patientId = `PAT-ASSISTED-${dateStr}-${tokenNumber}`;
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
-
-    const deptObj = (appState.departments || []).find(d => d.name === receptionPatient.primaryDepartment) || { id: 'gen_med', name: 'General Medicine' };
-    const position = appState.tokens.filter(t => t.primaryDepartment === deptObj.name && t.status === 'waiting').length + 1;
-    const waitTime = position * (deptObj.average_wait_time || 15);
-
-    const newToken = {
-        id: tokenId,
-        type: receptionPatient.type,
-        primaryDepartment: deptObj.name,
-        timestamp: now,
-        scheduledTime: scheduledTime,
-        patient: {
-            name: receptionPatient.name,
-            email: '',
-            phone: receptionPatient.phone,
-            age: parseInt(receptionPatient.age || '0'),
-            gender: receptionPatient.gender,
-            patientId: patientId
-        },
-        status: 'waiting',
-        priority: receptionPatient.type === 'emergency' ? 1 : receptionPatient.type === 'disabled' ? 2 : 3,
-        qrCode: tokenId,
-        validUntil: endOfDay,
-        createdAt: now,
-        estimatedWaitTime: waitTime,
-        positionInQueue: position,
-        booking_type: 'assisted',
-        visits: [],
-        prescriptions: [],
-        labTests: [],
-        departmentAccess: [deptObj.name]
-    };
-
-    try {
-        // Save to database
-        const { error } = await supabase.from('queue').insert([{
-            token_id: tokenId,
-            patient_name: newToken.patient.name,
-            department: newToken.primaryDepartment,
-            status: 'waiting',
-            booking_type: 'assisted',
-            patient_phone: receptionPatient.phone,
-            patient_age: parseInt(receptionPatient.age || '0'),
-            patient_gender: receptionPatient.gender,
-            doctor_id: (receptionPatient.assignedDoctor && receptionPatient.assignedDoctor !== 'any') ? receptionPatient.assignedDoctor : null,
-            token_data: newToken
-        }]);
-
-        if (error) throw error;
-
-        // Insert into queue_visits relation
-        const { error: visitError } = await supabase.from('queue_visits').insert([{
-            token_id: tokenId,
-            department_id: deptObj.id,
-            doctor_id: (receptionPatient.assignedDoctor && receptionPatient.assignedDoctor !== 'any') ? receptionPatient.assignedDoctor : null,
-            status: 'waiting',
-            sequence_order: 1
-        }]);
-
-        if (visitError) {
-            // Cleanup queue insert to maintain consistency
-            await supabase.from('queue').delete().eq('token_id', tokenId).catch(console.error);
-            throw visitError;
-        }
-
-        // Update app context optimistically
-        setAppState(prev => ({
-            ...prev,
-            tokens: [...prev.tokens, newToken]
-        }));
-
-        setGeneratedKioskToken(newToken);
-        toast.success("Token Generated Successfully!");
-        receptionBookingInProgress.current = false;
-        setReceptionLoading(false);
-    } catch (error) {
-        console.error('Assisted Token Generation Failed:', {
-            message: error.message,
-            code: error.code,
-            details: error.details,
-            hint: error.hint,
-            raw: error
-        });
-        toast.error("Unable to generate the token. Please try again.");
-        receptionBookingInProgress.current = false;
-        setReceptionLoading(false);
-    }
-  };
-
-  // Queue Transition Handlers
-  const handleStartConsultation = async () => {
-    if (!activePatient || isProcessing) return;
-    setIsProcessing(true);
-
-    try {
-      const activeVisit = (activePatient.visits || []).find(v => v.department_id === staffDeptId && (v.status === 'waiting' || v.status === 'called'));
-      
-      if (activeVisit) {
-        await supabase
-          .from('queue_visits')
-          .update({ status: 'in_consultation' })
-          .eq('id', activeVisit.id);
-      }
-
-      const updatedTokenProps = { ...activePatient, status: "in_consultation" };
-      await supabase
-        .from('queue')
-        .update({ status: 'in_consultation', token_data: updatedTokenProps })
-        .eq('token_id', activePatient.id);
-
-      const updatedTokens = appState.tokens.map((token) =>
-        token.id === activePatient.id ? updatedTokenProps : token
-      );
-      setAppState((prev) => ({ ...prev, tokens: updatedTokens }));
-
-      toast.success("Consultation Started", {
-        description: `Consultation started with ${activePatient.patient?.name || "Patient"}.`,
-      });
-    } catch (error) {
-      console.error("Start consultation failed:", error);
-      toast.error("Error", { description: "Something went wrong. Please try again." });
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleSkipPatient = async () => {
-    if (!activePatient || isProcessing) return;
-    setIsProcessing(true);
-
-    try {
-      const activeVisit = (activePatient.visits || []).find(v => v.department_id === staffDeptId && (v.status === 'waiting' || v.status === 'called' || v.status === 'in_consultation'));
-      
-      if (activeVisit) {
-        await supabase
-          .from('queue_visits')
-          .update({ status: 'skipped' })
-          .eq('id', activeVisit.id);
-      }
-
-      const updatedTokenProps = { ...activePatient, status: "skipped" };
-      await supabase
-        .from('queue')
-        .update({ status: 'skipped', token_data: updatedTokenProps })
-        .eq('token_id', activePatient.id);
-
-      const updatedTokens = appState.tokens.map((token) =>
-        token.id === activePatient.id ? updatedTokenProps : token
-      );
-      setAppState((prev) => ({ ...prev, tokens: updatedTokens }));
-
-      toast.success("Patient Skipped", {
-        description: `${activePatient.patient?.name || "Patient"} has been skipped.`,
-      });
-
-      // Find next patient
-      const remainingTokens = allActiveTokens.filter(t => t.id !== activePatient.id);
-      setActivePatient(remainingTokens.length > 0 ? remainingTokens[0] : null);
-    } catch (error) {
-      console.error("Skip patient failed:", error);
-      toast.error("Error", { description: "Something went wrong. Please try again." });
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleCancelToken = async () => {
-    if (!activePatient || isProcessing) return;
-    setIsProcessing(true);
-
-    try {
-      const activeVisit = (activePatient.visits || []).find(v => v.department_id === staffDeptId && (v.status === 'waiting' || v.status === 'called' || v.status === 'in_consultation'));
-      
-      if (activeVisit) {
-        await supabase
-          .from('queue_visits')
-          .update({ status: 'cancelled' })
-          .eq('id', activeVisit.id);
-      }
-
-      const updatedTokenProps = { ...activePatient, status: "cancelled" };
-      await supabase
-        .from('queue')
-        .update({ status: 'cancelled', token_data: updatedTokenProps })
-        .eq('token_id', activePatient.id);
-
-      const updatedTokens = appState.tokens.map((token) =>
-        token.id === activePatient.id ? updatedTokenProps : token
-      );
-      setAppState((prev) => ({ ...prev, tokens: updatedTokens }));
-
-      toast.success("Token Cancelled", {
-        description: `Token ${activePatient.id} has been cancelled.`,
-      });
-
-      // Find next patient
-      const remainingTokens = allActiveTokens.filter(t => t.id !== activePatient.id);
-      setActivePatient(remainingTokens.length > 0 ? remainingTokens[0] : null);
-    } catch (error) {
-      console.error("Cancel token failed:", error);
-      toast.error("Error", { description: "Something went wrong. Please try again." });
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleCallPatient = async () => {
-    if (!activePatient || isProcessing) return;
-    setIsProcessing(true);
-    
-    const roomCounter = appState.staffInfo?.room_counter || 'Room 101';
-
-    try {
-      // 1. Find active visit in queue_visits for this doctor's clinic
-      const activeVisit = (activePatient.visits || []).find(v => v.department_id === staffDeptId && (v.status === 'waiting' || v.status === 'called'));
-      
-      if (activeVisit) {
-        // Update visit status and room counter
-        await supabase
-          .from('queue_visits')
-          .update({ 
-            status: 'called', 
-            called_at: new Date().toISOString(),
-            room_counter: roomCounter 
-          })
-          .eq('id', activeVisit.id);
-      }
-
-      // Update main queue token status and room counter
-      const updatedTokenProps = { ...activePatient, status: "called", room_counter: roomCounter };
-      await supabase
-        .from('queue')
-        .update({ 
-            status: 'called', 
-            room_counter: roomCounter,
-            token_data: updatedTokenProps 
-        })
-        .eq('token_id', activePatient.id);
-
-      // 2. Local State update
-      const updatedTokens = appState.tokens.map((token) =>
-        token.id === activePatient.id ? updatedTokenProps : token
-      );
-      setAppState((prev) => ({ ...prev, tokens: updatedTokens }));
-
-      toast.success("Called Patient", {
-        description: `${activePatient.patient?.name || "Patient"} requested at ${roomCounter}.`,
-      });
-
-      // 3. TTS Announcement
-      const language = appState.language || 'en';
-      const tokenIdClean = activePatient.id.split('-').pop() || activePatient.id;
-      
-      let text = `Token number ${tokenIdClean}, please proceed to ${roomCounter}`;
-      if (language === 'hi') {
-          text = `टोकेन नंबर ${tokenIdClean}, कृपया ${roomCounter} पर जाएं`;
-      } else if (language === 'te') {
-          text = `టోకెన్ నంబర్ ${tokenIdClean}, దయచేసి ${roomCounter} కి వెళ్ళండి`;
-      }
-      
-      if (Platform.OS === 'web') {
-          if ('speechSynthesis' in window) {
-              window.speechSynthesis.cancel();
-              const utterance = new SpeechSynthesisUtterance(text);
-              utterance.lang = language === 'hi' ? 'hi-IN' : language === 'te' ? 'te-IN' : 'en-US';
-              window.speechSynthesis.speak(utterance);
-          }
-      } else {
-          try {
-              const Speech = require('expo-speech');
-              Speech.stop();
-              Speech.speak(text, { 
-                  language: language === 'hi' ? 'hi-IN' : language === 'te' ? 'te-IN' : 'en-US' 
-              });
-          } catch (speechErr) {
-              console.error("Native TTS call failed:", speechErr);
-          }
-      }
-    } catch (error) {
-      console.error("Call handling failed:", error);
-      toast.error("Error", { description: "Something went wrong. Please try again." });
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
   const handleMarkComplete = async () => {
-    if (!activePatient || isProcessing) return;
-    setIsProcessing(true);
+    if (!activePatient) return;
 
     try {
-      // 1. Find active visit in queue_visits for this doctor's clinic
-      const activeVisit = (activePatient.visits || []).find(v => v.department_id === staffDeptId && (v.status === 'waiting' || v.status === 'called'));
-      
-      if (activeVisit) {
-        // Mark current visit as completed
-        await supabase
-          .from('queue_visits')
-          .update({ 
-            status: 'completed', 
-            completed_at: new Date().toISOString() 
-          })
-          .eq('id', activeVisit.id);
-      }
+      // Update Supabase queue table
+      await supabase
+        .from('queue')
+        .update({ status: 'completed' })
+        .eq('token_id', activePatient.id);
 
-      let updatedTokenProps = { ...activePatient };
-
-      if (referralDeptId) {
-        // 2. We are referring the patient!
-        const targetDept = (appState.departments || []).find(d => d.id === referralDeptId);
-        const targetDeptName = targetDept ? targetDept.name : 'Referred Department';
-        
-        // Find next sequence order
-        const maxSeq = (activePatient.visits || []).reduce((max, v) => Math.max(max, v.sequence_order || 0), 0);
-        const nextSeq = maxSeq + 1;
-
-        // Check if duplicate visit exists
-        const hasActiveReferredVisit = (activePatient.visits || []).some(v => v.department_id === referralDeptId && (v.status === 'waiting' || v.status === 'called'));
-
-        if (!hasActiveReferredVisit) {
-          await supabase
-            .from('queue_visits')
-            .insert([{
-              token_id: activePatient.id,
-              department_id: referralDeptId,
-              doctor_id: null,
-              status: 'waiting',
-              sequence_order: nextSeq
-            }]);
-        }
-
-        updatedTokenProps.status = "waiting";
-        updatedTokenProps.room_counter = null;
-        updatedTokenProps.doctor_id = null;
-
-        await supabase
-          .from('queue')
-          .update({ 
-            status: 'waiting', 
-            room_counter: null,
-            doctor_id: null,
-            token_data: updatedTokenProps 
-          })
-          .eq('token_id', activePatient.id);
-
-        toast.success("Patient Referred", {
-          description: `Successfully referred to ${targetDeptName}.`,
-        });
-      } else {
-        // 3. Simple completion
-        updatedTokenProps.status = "completed";
-        
-        await supabase
-          .from('queue')
-          .update({ 
-            status: 'completed', 
-            token_data: updatedTokenProps 
-          })
-          .eq('token_id', activePatient.id);
-
-        toast.success("Consultation Completed", {
-          description: `${activePatient.patient?.name || "Patient"}'s session is closed.`,
-        });
-      }
-
+      // Optimistic update
       const updatedTokens = appState.tokens.map((token) =>
-        token.id === activePatient.id ? updatedTokenProps : token
+        token.id === activePatient.id ? { ...token, status: "completed" } : token
       );
-      setAppState((prev) => ({ ...prev, tokens: updatedTokens }));
 
-      // Reset states
+      setAppState((prev) => ({ ...prev, tokens: updatedTokens }));
+      toast.success("Consultation Completed", {
+        description: `${activePatient.patient?.name || "Patient"}'s session is closed.`,
+      });
+
       setPrescriptionMode(null);
-      setReferralDeptId("");
-      setDiagnosis("");
-      setMedicines([]);
-      setAdvice("");
-      
+
       // Find next patient
       const remainingTokens = allActiveTokens.filter(t => t.id !== activePatient.id);
       setActivePatient(remainingTokens.length > 0 ? remainingTokens[0] : null);
     } catch (error) {
-      console.error("Complete handling failed:", error);
-      toast.error("Error", { description: "Something went wrong. Please try again." });
-    } finally {
-      setIsProcessing(false);
+      toast.error("Error", { description: "Failed to mark patient as completed." });
     }
   };
 
@@ -658,7 +382,7 @@ export function StaffDashboard() {
     scanLockRef.current = false;
   };
 
-  const handleBarCodeScanned = ({ data }) => {
+  const handleBarCodeScanned = async ({ data }) => {
     // Prevent multiple rapid scans
     if (scanLockRef.current) return;
     scanLockRef.current = true;
@@ -679,32 +403,38 @@ export function StaffDashboard() {
       return;
     }
 
-    // Mark token as completed
-    const updatedTokenProps = { ...matchedToken, status: "completed" };
-    const updatedTokens = appState.tokens.map((token) =>
-      token.id === matchedToken.id ? updatedTokenProps : token
-    );
-    
-    // Do not await, fire and forget for snappy UI
-    supabase.from('queue').update({ status: 'completed', token_data: updatedTokenProps }).eq('token_id', matchedToken.id).catch(console.error);
+    try {
+      // Update Supabase queue table
+      await supabase
+        .from('queue')
+        .update({ status: 'completed' })
+        .eq('token_id', matchedToken.id);
 
-    setAppState((prev) => ({ ...prev, tokens: updatedTokens }));
+      // Optimistic upate
+      const updatedTokens = appState.tokens.map((token) =>
+        token.id === matchedToken.id ? { ...token, status: "completed" } : token
+      );
+      setAppState((prev) => ({ ...prev, tokens: updatedTokens }));
 
-    // Set the scanned patient for display
-    setLastScannedPatient(matchedToken);
+      // Set the scanned patient for display
+      setLastScannedPatient(matchedToken);
 
-    // Find next patient in queue
-    const remainingTokens = allActiveTokens.filter((tok) => tok.id !== matchedToken.id);
-    const nextInLine = remainingTokens.length > 0 ? remainingTokens[0] : null;
-    setNextPatientAfterScan(nextInLine);
-    setActivePatient(nextInLine);
+      // Find next patient in queue
+      const remainingTokens = allActiveTokens.filter((tok) => tok.id !== matchedToken.id);
+      const nextInLine = remainingTokens.length > 0 ? remainingTokens[0] : null;
+      setNextPatientAfterScan(nextInLine);
+      setActivePatient(nextInLine);
 
-    setPrescriptionMode(null);
-    setScannerOpen(false);
+      setPrescriptionMode(null);
+      setScannerOpen(false);
 
-    toast.success("✅ Appointment Completed", {
-      description: `${matchedToken.patient?.name || "Patient"}'s appointment has been marked complete.`,
-    });
+      toast.success("✅ Appointment Completed", {
+        description: `${matchedToken.patient?.name || "Patient"}'s appointment has been marked complete.`,
+      });
+    } catch (error) {
+      toast.error("Error", { description: "Failed to mark scanned patient as completed." });
+      scanLockRef.current = false;
+    }
   };
 
   const formatTokenId = (id) => {
@@ -721,168 +451,6 @@ export function StaffDashboard() {
     return { bg: "#f0f9ff", text: "#0ea5e9", border: "#bae6fd", name: "General" };
   };
 
-  const isReceptionist = appState.staffInfo?.department === 'Receptionist' || appState.staffInfo?.role === 'receptionist';
-
-  if (isReceptionist) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <View style={styles.headerTop}>
-            <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
-              <ArrowLeft size={24} color="#1e293b" />
-            </TouchableOpacity>
-            <View style={styles.headerInfo}>
-              <Text style={styles.dashboardTitle}>Assisted Registration</Text>
-              <Text style={styles.doctorName}>Reception / Helpdesk Desk</Text>
-            </View>
-          </View>
-        </View>
-
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          {generatedKioskToken ? (
-            <Card style={{ padding: 24, borderRadius: 16, backgroundColor: '#f0fdf4', borderColor: '#bbf7d0', borderWidth: 2, alignItems: 'center' }}>
-              <CheckCircle2 size={64} color="#16a34a" style={{ marginBottom: 16 }} />
-              <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#16a34a', marginBottom: 8 }}>TOKEN GENERATED</Text>
-              
-              <View style={{ backgroundColor: '#fff', padding: 20, borderRadius: 12, width: '100%', alignItems: 'center', marginVertical: 16, borderWidth: 1, borderColor: '#cbd5e1' }}>
-                <Text style={{ fontSize: 13, color: '#64748b', fontWeight: 'bold' }}>PATIENT NAME</Text>
-                <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#0f172a', marginBottom: 12 }}>{generatedKioskToken.patient.name}</Text>
-                
-                <Text style={{ fontSize: 13, color: '#64748b', fontWeight: 'bold' }}>TOKEN ID</Text>
-                <Text style={{ fontSize: 36, fontWeight: '900', color: '#2563eb', letterSpacing: 1 }}>{generatedKioskToken.id}</Text>
-                
-                <Text style={{ fontSize: 13, color: '#64748b', fontWeight: 'bold', marginTop: 12 }}>CLINIC / DEPT</Text>
-                <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#0f172a' }}>{generatedKioskToken.primaryDepartment}</Text>
-              </View>
-
-              <TouchableOpacity 
-                style={{ backgroundColor: '#2563eb', paddingVertical: 14, paddingHorizontal: 32, borderRadius: 8, marginTop: 8 }}
-                onPress={() => setGeneratedKioskToken(null)}
-              >
-                <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>Register Next Patient</Text>
-              </TouchableOpacity>
-            </Card>
-          ) : (
-            <View style={{ gap: 16 }}>
-              {/* Search Section */}
-              <Card style={{ padding: 16, borderRadius: 12 }}>
-                <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#1e293b', marginBottom: 8 }}>Search Existing Patient</Text>
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <TextInput
-                    style={{ flex: 1, borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, backgroundColor: '#fff', color: '#1e293b' }}
-                    placeholder="Enter phone number"
-                    value={searchPhone}
-                    onChangeText={setSearchPhone}
-                    keyboardType="phone-pad"
-                  />
-                  <TouchableOpacity 
-                    style={{ backgroundColor: '#0ea5e9', justifyContent: 'center', paddingHorizontal: 20, borderRadius: 8 }}
-                    onPress={handleSearchPatient}
-                    disabled={isSearching}
-                  >
-                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>{isSearching ? "Searching..." : "Search"}</Text>
-                  </TouchableOpacity>
-                </View>
-              </Card>
-
-              {/* Patient Form Section */}
-              <Card style={{ padding: 16, borderRadius: 12, gap: 12 }}>
-                <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#1e293b', marginBottom: 4 }}>Basic Patient Details</Text>
-                
-                <View>
-                  <Text style={styles.formLabel}>Full Name</Text>
-                  <TextInput
-                    style={styles.formInput}
-                    placeholder="Enter patient full name"
-                    value={receptionPatient.name}
-                    onChangeText={(val) => setReceptionPatient(p => ({ ...p, name: val }))}
-                  />
-                </View>
-
-                <View>
-                  <Text style={styles.formLabel}>Phone Number</Text>
-                  <TextInput
-                    style={styles.formInput}
-                    placeholder="Enter phone number"
-                    value={receptionPatient.phone}
-                    onChangeText={(val) => setReceptionPatient(p => ({ ...p, phone: val }))}
-                    keyboardType="phone-pad"
-                  />
-                </View>
-
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.formLabel}>Age (Yrs)</Text>
-                    <TextInput
-                      style={styles.formInput}
-                      placeholder="Age"
-                      value={receptionPatient.age}
-                      onChangeText={(val) => setReceptionPatient(p => ({ ...p, age: val }))}
-                      keyboardType="numeric"
-                    />
-                  </View>
-
-                  <View style={{ flex: 1.5 }}>
-                    <Text style={styles.formLabel}>Gender</Text>
-                    <Select value={receptionPatient.gender} onValueChange={(val) => setReceptionPatient(p => ({ ...p, gender: val }))}>
-                      <SelectTrigger style={{ height: 44, borderColor: '#cbd5e1', borderWidth: 1, borderRadius: 8, paddingHorizontal: 12 }}>
-                        <SelectValue placeholder="Gender" />
-                      </SelectTrigger>
-                      <SelectContent style={{ backgroundColor: '#fff' }}>
-                        <SelectItem value="male">Male</SelectItem>
-                        <SelectItem value="female">Female</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
-                        <SelectItem value="unspecified">Unspecified</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </View>
-                </View>
-
-                <View>
-                  <Text style={styles.formLabel}>Service Type / Category</Text>
-                  <Select value={receptionPatient.type} onValueChange={(val) => setReceptionPatient(p => ({ ...p, type: val }))}>
-                    <SelectTrigger style={{ height: 44, borderColor: '#cbd5e1', borderWidth: 1, borderRadius: 8, paddingHorizontal: 12 }}>
-                      <SelectValue placeholder="Category" />
-                    </SelectTrigger>
-                    <SelectContent style={{ backgroundColor: '#fff' }}>
-                      <SelectItem value="common">General Booking</SelectItem>
-                      <SelectItem value="emergency">Emergency Booking</SelectItem>
-                      <SelectItem value="disabled">Accessibility Booking</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </View>
-
-                <View>
-                  <Text style={styles.formLabel}>Clinic / Department</Text>
-                  <Select value={receptionPatient.primaryDepartment} onValueChange={(val) => setReceptionPatient(p => ({ ...p, primaryDepartment: val }))}>
-                    <SelectTrigger style={{ height: 44, borderColor: '#cbd5e1', borderWidth: 1, borderRadius: 8, paddingHorizontal: 12 }}>
-                      <SelectValue placeholder="Select Clinic" />
-                    </SelectTrigger>
-                    <SelectContent style={{ backgroundColor: '#fff' }}>
-                      {(appState.departments || []).map(d => (
-                        <SelectItem key={d.id} value={d.name}>{d.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </View>
-
-                <TouchableOpacity 
-                  style={{ backgroundColor: '#16a34a', paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 12 }}
-                  onPress={handleReceptionGenerateToken}
-                  disabled={receptionLoading}
-                >
-                  <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>
-                    {receptionLoading ? "Generating Token..." : "Generate Token & Print"}
-                  </Text>
-                </TouchableOpacity>
-              </Card>
-            </View>
-          )}
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={styles.container}>
       {/* 1. HEADER */}
@@ -892,7 +460,7 @@ export function StaffDashboard() {
             <ArrowLeft size={24} color="#1e293b" />
           </TouchableOpacity>
           <View style={styles.headerInfo}>
-            <Text style={styles.dashboardTitle}>{t.staffDashboardTitle || "Staff Dashboard"}</Text>
+            <Text style={styles.dashboardTitle}>{t('staffDashboardTitle') || "Staff Dashboard"}</Text>
             <Text style={styles.doctorName}>
               {appState.staffInfo?.name || "Dr. Assigned"} • {appState.staffInfo?.department || "General"}
             </Text>
@@ -906,141 +474,182 @@ export function StaffDashboard() {
         </View>
         <View style={styles.statsBar}>
           <Text style={styles.waitCountText}>
-            Patients Waiting: <Text style={{ fontWeight: "700" }}>{totalWaiting}</Text>
+            {t('staffWaiting')}: <Text style={{ fontWeight: "700" }}>{totalWaiting}</Text>
           </Text>
         </View>
       </View>
 
+
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+
+        {/* EMERGENCY ALERTS SECTION */}
+        {emergencyAlerts.length > 0 && (
+          <View style={eaStyles.section}>
+            <View style={eaStyles.sectionHeader}>
+              <AlertTriangle size={20} color="#dc2626" />
+              <Text style={eaStyles.sectionTitle}>{t('staffEmergencyAlerts')} ({emergencyAlerts.length})</Text>
+            </View>
+
+            {emergencyAlerts.map((alert) => {
+              const sevStyle = getSeverityStyle(alert.severity);
+              const statusStyle = getAlertStatusStyle(alert.alert_status);
+              return (
+                <View key={alert.alert_id} style={[eaStyles.alertCard, { borderColor: sevStyle.border, backgroundColor: sevStyle.bg }]}>
+                  {/* Header row: severity + status */}
+                  <View style={eaStyles.alertHeader}>
+                    <View style={[eaStyles.severityBadge, { backgroundColor: sevStyle.text }]}>
+                      <Text style={eaStyles.severityBadgeText}>{sevStyle.label}</Text>
+                    </View>
+                    <View style={[eaStyles.statusBadge, { backgroundColor: statusStyle.bg }]}>
+                      <Text style={eaStyles.statusBadgeText}>{statusStyle.label}</Text>
+                    </View>
+                  </View>
+
+                  {/* Emergency + Patient info */}
+                  <Text style={[eaStyles.alertType, { color: sevStyle.text }]}>{alert.emergency_type}</Text>
+                  <Text style={eaStyles.patientName}>{alert.patient_name}{alert.patient_age ? `, ${alert.patient_age} yrs` : ''}{alert.patient_gender ? ` • ${alert.patient_gender.charAt(0).toUpperCase()}` : ''}</Text>
+
+                  {/* Condition */}
+                  {alert.condition_details ? (
+                    <Text style={eaStyles.conditionText} numberOfLines={3}>{alert.condition_details}</Text>
+                  ) : null}
+
+                  {/* Details row */}
+                  <View style={eaStyles.detailsRow}>
+                    {alert.arrival_method ? (
+                      <View style={eaStyles.detailChip}>
+                        <Truck size={12} color="#475569" />
+                        <Text style={eaStyles.detailChipText}>{getArrivalLabel(alert.arrival_method)}</Text>
+                      </View>
+                    ) : null}
+                    {alert.estimated_arrival ? (
+                      <View style={eaStyles.detailChip}>
+                        <Clock size={12} color="#475569" />
+                        <Text style={eaStyles.detailChipText}>{t('staffEta') || "ETA"}: {alert.estimated_arrival}</Text>
+                      </View>
+                    ) : null}
+                    {alert.contact_number ? (
+                      <View style={eaStyles.detailChip}>
+                        <Phone size={12} color="#475569" />
+                        <Text style={eaStyles.detailChipText}>{alert.contact_number}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  {/* Assistance needed */}
+                  {alert.assistance_needed && alert.assistance_needed.length > 0 ? (
+                    <View style={eaStyles.assistanceRow}>
+                      <Text style={eaStyles.assistanceLabel}>{t('staffAssistance') || "Assistance"}:</Text>
+                      <Text style={eaStyles.assistanceText}>{alert.assistance_needed.join(', ')}</Text>
+                    </View>
+                  ) : null}
+
+                  {/* Time + acknowledged by */}
+                  <View style={eaStyles.timeRow}>
+                    <Text style={eaStyles.timeText}>{t('staffReceived') || "Received"}: {formatAlertTime(alert.created_at)}</Text>
+                    {alert.acknowledged_by ? (
+                      <Text style={eaStyles.ackText}>{t('staffAck') || "Ack"}: {alert.acknowledged_by}</Text>
+                    ) : null}
+                  </View>
+
+                  {/* Action buttons */}
+                  <View style={eaStyles.actionsRow}>
+                    {alert.alert_status === 'new' && (
+                      <TouchableOpacity style={eaStyles.ackBtn} onPress={() => handleAcknowledgeAlert(alert.alert_id)}>
+                        <Bell size={14} color="#fff" />
+                        <Text style={eaStyles.ackBtnText}>{t('staffAcknowledge') || "Acknowledge"}</Text>
+                      </TouchableOpacity>
+                    )}
+                    {(alert.alert_status === 'new' || alert.alert_status === 'acknowledged') && (
+                      <TouchableOpacity style={eaStyles.inProgressBtn} onPress={() => handleUpdateAlertStatus(alert.alert_id, 'in_progress')}>
+                        <Activity size={14} color="#fff" />
+                        <Text style={eaStyles.ackBtnText}>{t('staffInProgress') || "In Progress"}</Text>
+                      </TouchableOpacity>
+                    )}
+                    {alert.alert_status !== 'resolved' && (
+                      <TouchableOpacity style={eaStyles.resolveBtn} onPress={() => handleUpdateAlertStatus(alert.alert_id, 'resolved')}>
+                        <CheckCircle2 size={14} color="#fff" />
+                        <Text style={eaStyles.ackBtnText}>{t('staffResolve') || "Resolve"}</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                </View>
+              );
+            })}
+          </View>
+        )}
+
         {/* 2. ACTIVE PATIENT CARD */}
         {activePatient ? (
           <View style={styles.activePatientContainer}>
-            <Text style={styles.sectionTitle}>Current Patient</Text>
+            <Text style={styles.sectionTitle}>{t('staffCurrentPatient') || "Current Patient"}</Text>
             <Card style={styles.activeCard}>
               <View style={styles.activeCardContent}>
                 <View style={styles.mainTokenArea}>
-                  <Text style={styles.tokenLabel}>TOKEN</Text>
+                  <Text style={styles.tokenLabel}>{t('staffToken') || "TOKEN"}</Text>
                   <Text style={styles.largeToken}>{formatTokenId(activePatient.id)}</Text>
                   <View style={[styles.priorityBadge, { backgroundColor: getPriorityColors(activePatient.type).bg }]}>
                     <Text style={[styles.priorityText, { color: getPriorityColors(activePatient.type).text }]}>
-                      {getPriorityColors(activePatient.type).name}
+                      {t(activePatient.type === 'emergency' ? 'emgEmergency' : activePatient.type === 'disabled' ? 'pdDisabled' : 'pdCommon') || getPriorityColors(activePatient.type).name}
                     </Text>
                   </View>
                 </View>
-                
+
                 <View style={styles.patientDetails}>
                   <Text style={styles.patientName}>{activePatient.patient?.name || "Patient Name"}</Text>
                   <Text style={styles.patientAge}>
-                    {activePatient.patient?.age || "--"} Yrs • {activePatient.patient?.gender?.charAt(0).toUpperCase() || "U"}
+                    {activePatient.patient?.age || "--"} {t('staffYrs') || "Yrs"} • {t(activePatient.patient?.gender === 'male' ? 'emgMale' : activePatient.patient?.gender === 'female' ? 'emgFemale' : activePatient.patient?.gender === 'other' ? 'emgOther' : '') || activePatient.patient?.gender?.charAt(0).toUpperCase() || "U"}
                   </Text>
                   <View style={styles.infoRow}>
                     <Stethoscope size={14} color="#64748b" />
-                    <Text style={styles.infoText}>{activePatient.primaryDepartment || "General Consultation"}</Text>
+                    <Text style={styles.infoText}>{t(activePatient.primaryDepartment === 'Emergency' ? 'pdEmergency' : activePatient.primaryDepartment === 'Pediatrics' ? 'Pediatrics' : 'pdCommon') || activePatient.primaryDepartment || "General Consultation"}</Text>
                   </View>
                   <View style={styles.infoRow}>
                     <Activity size={14} color="#64748b" />
                     <Text style={styles.infoText} numberOfLines={1}>
-                      Symptoms: {activePatient.patient?.symptoms || "None"}
+                      {t('staffSymptoms') || "Symptoms"}: {activePatient.symptoms || "Standard check-up"}
                     </Text>
                   </View>
                   <View style={styles.verifyContainer}>
-                    <Text style={styles.verifyText}>ID: {activePatient.id.substring(0,8).toUpperCase()}</Text>
+                    <Text style={styles.verifyText}>ID: {activePatient.id.substring(0, 8).toUpperCase()}</Text>
                   </View>
                 </View>
               </View>
             </Card>
 
-            {/* Referral Dropdown (Only show in consultation) */}
-            {activePatient.status === 'in_consultation' && (
-              <View style={{ marginBottom: 16 }}>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: '#475569', marginBottom: 6 }}>Refer Patient to Clinic / Department:</Text>
-                <Select value={referralDeptId} onValueChange={setReferralDeptId}>
-                  <SelectTrigger style={{ backgroundColor: '#fff', borderColor: '#cbd5e1', borderWidth: 1, borderRadius: 8, padding: 12 }}>
-                    <SelectValue placeholder="Select Clinic / Department (Optional)" />
-                  </SelectTrigger>
-                  <SelectContent style={{ backgroundColor: '#fff' }}>
-                    <SelectItem value="">None (Consultation Completed)</SelectItem>
-                    {(appState.departments || []).filter(d => d.id !== staffDeptId).map(d => (
-                      <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </View>
-            )}
-
             {/* 3. MAIN ACTION AREA */}
             <View style={styles.mainActionArea}>
-              {activePatient.status === 'waiting' && (
-                <>
-                  <TouchableOpacity style={[styles.completeBtn, { backgroundColor: '#ea580c', flex: 1.5, opacity: isProcessing ? 0.6 : 1 }]} onPress={handleCallPatient} disabled={isProcessing}>
-                    <Volume2 size={24} color="#fff" />
-                    <Text style={styles.completeBtnText}>{isProcessing ? 'Calling...' : 'Call Patient'}</Text>
-                  </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.primaryActionBtn, prescriptionMode ? styles.activeActionBtn : null]}
+                onPress={() => setPrescriptionMode(prescriptionMode ? null : 'template')}
+              >
+                <FileText size={20} color={prescriptionMode ? "#fff" : "#2563eb"} />
+                <Text style={[styles.primaryActionText, prescriptionMode && { color: "#fff" }]}>{t('staffPrescription') || "Prescription"}</Text>
+              </TouchableOpacity>
 
-                  <TouchableOpacity style={[styles.completeBtn, { backgroundColor: '#eab308', flex: 1, opacity: isProcessing ? 0.6 : 1 }]} onPress={handleSkipPatient} disabled={isProcessing}>
-                    <Text style={styles.completeBtnText}>{isProcessing ? 'Skipping...' : 'Skip'}</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={[styles.completeBtn, { backgroundColor: '#dc2626', flex: 1, opacity: isProcessing ? 0.6 : 1 }]} onPress={handleCancelToken} disabled={isProcessing}>
-                    <Text style={styles.completeBtnText}>{isProcessing ? 'Cancelling...' : 'Cancel'}</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-
-              {activePatient.status === 'called' && (
-                <>
-                  <TouchableOpacity style={[styles.completeBtn, { backgroundColor: '#2563eb', flex: 1.5, opacity: isProcessing ? 0.6 : 1 }]} onPress={handleStartConsultation} disabled={isProcessing}>
-                    <Stethoscope size={24} color="#fff" />
-                    <Text style={styles.completeBtnText}>{isProcessing ? 'Starting...' : 'Start Consult'}</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={[styles.completeBtn, { backgroundColor: '#eab308', flex: 1, opacity: isProcessing ? 0.6 : 1 }]} onPress={handleSkipPatient} disabled={isProcessing}>
-                    <Text style={styles.completeBtnText}>{isProcessing ? 'Skipping...' : 'Skip'}</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={[styles.completeBtn, { backgroundColor: '#dc2626', flex: 1, opacity: isProcessing ? 0.6 : 1 }]} onPress={handleCancelToken} disabled={isProcessing}>
-                    <Text style={styles.completeBtnText}>{isProcessing ? 'Cancelling...' : 'Cancel'}</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-
-              {activePatient.status === 'in_consultation' && (
-                <>
-                  <TouchableOpacity
-                    style={[styles.primaryActionBtn, prescriptionMode ? styles.activeActionBtn : null]}
-                    onPress={() => setPrescriptionMode(prescriptionMode ? null : 'template')}
-                  >
-                    <FileText size={20} color={prescriptionMode ? "#fff" : "#2563eb"} />
-                    <Text style={[styles.primaryActionText, prescriptionMode && { color: "#fff" }]}>Prescription</Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity style={[styles.completeBtn, { opacity: isProcessing ? 0.6 : 1 }]} onPress={handleMarkComplete} disabled={isProcessing}>
-                    <CheckCircle2 size={24} color="#fff" />
-                    <Text style={styles.completeBtnText}>{isProcessing ? 'Completing...' : 'Complete'}</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={[styles.completeBtn, { backgroundColor: '#dc2626', flex: 0.5, opacity: isProcessing ? 0.6 : 1 }]} onPress={handleCancelToken} disabled={isProcessing}>
-                    <Text style={styles.completeBtnText}>{isProcessing ? 'Cancelling...' : 'Cancel'}</Text>
-                  </TouchableOpacity>
-                </>
-              )}
+              <TouchableOpacity style={styles.completeBtn} onPress={handleMarkComplete}>
+                <CheckCircle2 size={24} color="#fff" />
+                <Text style={styles.completeBtnText}>{t('staffMarkComplete') || "Mark Complete"}</Text>
+              </TouchableOpacity>
             </View>
 
             {/* QR Scanner Section */}
             <TouchableOpacity style={styles.scanQrBtn} onPress={openScanner}>
-               <QrCode size={20} color="#fff" />
-               <Text style={styles.scanQrBtnText}>Scan QR Code</Text>
+              <QrCode size={20} color="#fff" />
+              <Text style={styles.scanQrBtnText}>{t('staffScanQrCode') || "Scan QR Code"}</Text>
             </TouchableOpacity>
 
             {/* QR Scanner Camera */}
             {scannerOpen && (
               <View style={styles.scannerContainer}>
                 <View style={styles.scannerHeader}>
-                  <Text style={styles.scannerTitle}>📷 Scanning...</Text>
+                  <Text style={styles.scannerTitle}>📷 {t('staffScanning') || "Scanning..."}</Text>
                   <TouchableOpacity onPress={closeScanner} style={styles.closeScannerBtn}>
-                    <Text style={styles.closeScannerText}>✕ Close</Text>
+                    <Text style={styles.closeScannerText}>✕ {t('staffClose') || "Close"}</Text>
                   </TouchableOpacity>
                 </View>
+
                 <View style={styles.cameraWrapper}>
                   <CameraView
                     style={styles.camera}
@@ -1058,11 +667,12 @@ export function StaffDashboard() {
                       <View style={[styles.scanCorner, styles.scanCornerBL]} />
                       <View style={[styles.scanCorner, styles.scanCornerBR]} />
                     </View>
-                    <Text style={styles.scanHintText}>Align QR code within the frame</Text>
+                    <Text style={styles.scanHintText}>{t('staffAlignFrame') || "Align QR code within the frame"}</Text>
                   </View>
                 </View>
               </View>
             )}
+
 
             {/* Scan Result: Completed Patient */}
             {lastScannedPatient && (
@@ -1070,7 +680,7 @@ export function StaffDashboard() {
                 <View style={styles.completedCard}>
                   <View style={styles.completedHeader}>
                     <CheckCircle2 size={20} color="#16a34a" />
-                    <Text style={styles.completedHeaderText}>Appointment Completed</Text>
+                    <Text style={styles.completedHeaderText}>{t('staffAppCompleted') || "Appointment Completed"}</Text>
                   </View>
                   <View style={styles.completedBody}>
                     <View style={styles.completedTokenCircle}>
@@ -1079,10 +689,10 @@ export function StaffDashboard() {
                     <View style={styles.completedInfo}>
                       <Text style={styles.completedName}>{lastScannedPatient.patient?.name || "Patient"}</Text>
                       <Text style={styles.completedDetail}>
-                        {lastScannedPatient.patient?.age || "--"} Yrs • {lastScannedPatient.primaryDepartment || "General"}
+                        {lastScannedPatient.patient?.age || "--"} {t('staffYrs') || "Yrs"} • {lastScannedPatient.primaryDepartment || "General"}
                       </Text>
                       <View style={styles.completedBadge}>
-                        <Text style={styles.completedBadgeText}>✓ Done</Text>
+                        <Text style={styles.completedBadgeText}>✓ {t('done') || "Done"}</Text>
                       </View>
                     </View>
                   </View>
@@ -1093,7 +703,7 @@ export function StaffDashboard() {
                   <View style={styles.nextPatientCard}>
                     <View style={styles.nextPatientHeader}>
                       <Activity size={18} color="#2563eb" />
-                      <Text style={styles.nextPatientHeaderText}>Next Patient's Turn</Text>
+                      <Text style={styles.nextPatientHeaderText}>{t('staffNextPatient') || "Next Patient's Turn"}</Text>
                     </View>
                     <View style={styles.nextPatientBody}>
                       <View style={[styles.nextTokenCircle, { backgroundColor: getPriorityColors(nextPatientAfterScan.type).bg }]}>
@@ -1104,12 +714,12 @@ export function StaffDashboard() {
                       <View style={styles.nextPatientInfo}>
                         <Text style={styles.nextPatientName}>{nextPatientAfterScan.patient?.name || "Patient"}</Text>
                         <Text style={styles.nextPatientDetail}>
-                          {nextPatientAfterScan.patient?.age || "--"} Yrs • {nextPatientAfterScan.primaryDepartment || "General"}
+                          {nextPatientAfterScan.patient?.age || "--"} {t('staffYrs') || "Yrs"} • {nextPatientAfterScan.primaryDepartment || "General"}
                         </Text>
                       </View>
                       <View style={[styles.nextPriorityBadge, { borderColor: getPriorityColors(nextPatientAfterScan.type).border }]}>
                         <Text style={[styles.nextPriorityText, { color: getPriorityColors(nextPatientAfterScan.type).text }]}>
-                          {getPriorityColors(nextPatientAfterScan.type).name}
+                          {t(nextPatientAfterScan.type === 'emergency' ? 'emgEmergency' : nextPatientAfterScan.type === 'disabled' ? 'pdDisabled' : 'pdCommon') || getPriorityColors(nextPatientAfterScan.type).name}
                         </Text>
                       </View>
                     </View>
@@ -1117,9 +727,10 @@ export function StaffDashboard() {
                 ) : (
                   <View style={styles.noMorePatientsCard}>
                     <CheckCircle2 size={24} color="#22c55e" />
-                    <Text style={styles.noMorePatientsText}>All appointments completed! 🎉</Text>
+                    <Text style={styles.noMorePatientsText}>{t('staffAllCompleted') || "All appointments completed! 🎉"}</Text>
                   </View>
                 )}
+
               </View>
             )}
 
@@ -1128,30 +739,31 @@ export function StaffDashboard() {
               <View style={styles.prescriptionPanel}>
                 {/* 3 Row-wise options */}
                 <View style={styles.prescriptionTabs}>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={[styles.tabBtn, prescriptionMode === 'template' && styles.activeTab]}
                     onPress={() => setPrescriptionMode('template')}
                   >
-                     <Text style={[styles.tabText, prescriptionMode === 'template' && styles.activeTabText]}>Template</Text>
+                    <Text style={[styles.tabText, prescriptionMode === 'template' && styles.activeTabText]}>{t('useTemplate') || "Template"}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={[styles.tabBtn, prescriptionMode === 'upload' && styles.activeTab]}
                     onPress={() => setPrescriptionMode('upload')}
                   >
-                     <Text style={[styles.tabText, prescriptionMode === 'upload' && styles.activeTabText]}>Upload</Text>
+                    <Text style={[styles.tabText, prescriptionMode === 'upload' && styles.activeTabText]}>{t('uploadPrescription') || "Upload"}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={[styles.tabBtn, prescriptionMode === 'scan' && styles.activeTab]}
                     onPress={() => setPrescriptionMode('scan')}
                   >
-                     <Text style={[styles.tabText, prescriptionMode === 'scan' && styles.activeTabText]}>Scan</Text>
+                    <Text style={[styles.tabText, prescriptionMode === 'scan' && styles.activeTabText]}>{t('scanQr') || "Scan"}</Text>
                   </TouchableOpacity>
                 </View>
+
 
                 {/* 4A. USE PRESCRIPTION TEMPLATE */}
                 {prescriptionMode === 'template' && (
                   <View style={styles.panelContent}>
-                    <Text style={styles.subTitle}>Quick Templates</Text>
+                    <Text style={styles.subTitle}>{t('staffQuickTemplates') || "Quick Templates"}</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsContainer}>
                       {TEMPLATES.map((tmpl, idx) => (
                         <TouchableOpacity key={idx} style={styles.chip} onPress={() => handleApplyTemplate(tmpl)}>
@@ -1160,42 +772,42 @@ export function StaffDashboard() {
                       ))}
                     </ScrollView>
 
-                    <Text style={styles.label}>Problem / Diagnosis</Text>
-                    <TextInput 
-                      style={styles.inputArea} 
-                      value={diagnosis} 
+                    <Text style={styles.label}>{t('staffDiagnosis') || "Problem / Diagnosis"}</Text>
+                    <TextInput
+                      style={styles.inputArea}
+                      value={diagnosis}
                       onChangeText={setDiagnosis}
-                      placeholder="Enter diagnosis..."
+                      placeholder={t('staffDiagnosisPlaceholder') || "Enter diagnosis..."}
                     />
 
-                    <Text style={[styles.label, {marginTop: 12}]}>Medicines & Dosage</Text>
+                    <Text style={[styles.label, { marginTop: 12 }]}>{t('staffMedicinesDosage') || "Medicines & Dosage"}</Text>
                     {medicines.map((med, index) => (
                       <View key={index} style={styles.medicineRow}>
-                        <TextInput 
-                          style={[styles.inputField, {flex: 2}]} 
-                          placeholder="Medicine Name" 
-                          value={med.name} 
+                        <TextInput
+                          style={[styles.inputField, { flex: 2 }]}
+                          placeholder={t('staffMedicineName') || "Medicine Name"}
+                          value={med.name}
                           onChangeText={(v) => updateMedicine(index, 'name', v)}
                         />
                         <View style={styles.medCol}>
-                           <TextInput 
-                             style={[styles.inputField, {marginBottom: 4}]} 
-                             placeholder="Dosage (e.g., 1-0-1)" 
-                             value={med.dosage} 
-                             onChangeText={(v) => updateMedicine(index, 'dosage', v)}
-                           />
-                           <View style={styles.quickDosages}>
-                             {QUICK_DOSAGE.map(q => (
-                               <TouchableOpacity key={q} style={styles.dosageChip} onPress={() => updateMedicine(index, 'dosage', q)}>
-                                 <Text style={styles.dosageChipText}>{q}</Text>
-                               </TouchableOpacity>
-                             ))}
-                           </View>
+                          <TextInput
+                            style={[styles.inputField, { marginBottom: 4 }]}
+                            placeholder={t('staffDosagePlaceholder') || "Dosage (e.g., 1-0-1)"}
+                            value={med.dosage}
+                            onChangeText={(v) => updateMedicine(index, 'dosage', v)}
+                          />
+                          <View style={styles.quickDosages}>
+                            {QUICK_DOSAGE.map(q => (
+                              <TouchableOpacity key={q} style={styles.dosageChip} onPress={() => updateMedicine(index, 'dosage', q)}>
+                                <Text style={styles.dosageChipText}>{q}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
                         </View>
-                        <TextInput 
-                          style={[styles.inputField, {flex: 0.8}]} 
-                          placeholder="Days" 
-                          value={med.days} 
+                        <TextInput
+                          style={[styles.inputField, { flex: 0.8 }]}
+                          placeholder={t('staffDays') || "Days"}
+                          value={med.days}
                           keyboardType="numeric"
                           onChangeText={(v) => updateMedicine(index, 'days', v)}
                         />
@@ -1203,38 +815,39 @@ export function StaffDashboard() {
                     ))}
                     <TouchableOpacity style={styles.addMedBtn} onPress={addMedicineRow}>
                       <Plus size={16} color="#2563eb" />
-                      <Text style={styles.addMedText}>Add Medicine</Text>
+                      <Text style={styles.addMedText}>{t('staffAddMedicine') || "Add Medicine"}</Text>
                     </TouchableOpacity>
 
-                    <Text style={[styles.label, {marginTop: 12}]}>Advice / Precautions</Text>
-                    <TextInput 
-                      style={[styles.inputArea, {height: 60}]} 
-                      value={advice} 
+                    <Text style={[styles.label, { marginTop: 12 }]}>{t('staffAdvice') || "Advice / Precautions"}</Text>
+                    <TextInput
+                      style={[styles.inputArea, { height: 60 }]}
+                      value={advice}
                       onChangeText={setAdvice}
-                      placeholder="Write short advice..."
+                      placeholder={t('staffAdvicePlaceholder') || "Write short advice..."}
                       multiline
                     />
 
                     <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
-                      <Save size={18} color="#fff" style={{marginRight: 8}}/>
-                      <Text style={styles.saveRxText}>Save Prescription</Text>
+                      <Save size={18} color="#fff" style={{ marginRight: 8 }} />
+                      <Text style={styles.saveRxText}>{t('staffSavePrescription') || "Save Prescription"}</Text>
                     </TouchableOpacity>
                   </View>
+
                 )}
 
                 {/* 4B. UPLOAD PRESCRIPTION */}
                 {prescriptionMode === 'upload' && (
                   <View style={styles.panelContent}>
                     <View style={styles.uploadArea}>
-                      <Upload size={48} color="#94a3b8" style={{marginBottom: 12}}/>
-                      <Text style={styles.uploadText}>Tap to choose Image or PDF</Text>
+                      <Upload size={48} color="#94a3b8" style={{ marginBottom: 12 }} />
+                      <Text style={styles.uploadText}>{t('staffUploadDesc') || "Tap to choose Image or PDF"}</Text>
                       <TouchableOpacity style={styles.chooseFileBtn}>
-                        <Text style={styles.chooseFileText}>Choose File</Text>
+                        <Text style={styles.chooseFileText}>{t('staffChooseFile') || "Choose File"}</Text>
                       </TouchableOpacity>
                     </View>
                     <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
-                      <Save size={18} color="#fff" style={{marginRight: 8}}/>
-                      <Text style={styles.saveRxText}>Save Prescription</Text>
+                      <Save size={18} color="#fff" style={{ marginRight: 8 }} />
+                      <Text style={styles.saveRxText}>{t('staffSavePrescription') || "Save Prescription"}</Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -1243,23 +856,24 @@ export function StaffDashboard() {
                 {prescriptionMode === 'scan' && (
                   <View style={styles.panelContent}>
                     <View style={styles.scanArea}>
-                      <Camera size={48} color="#94a3b8" style={{marginBottom: 12}}/>
-                      <Text style={styles.uploadText}>Camera Preview</Text>
-                      <View style={{flexDirection: 'row', gap: 12, marginTop: 16}}>
-                        <TouchableOpacity style={[styles.chooseFileBtn, {backgroundColor: '#e2e8f0'}]}>
-                          <Text style={[styles.chooseFileText, {color: '#475569'}]}>Start Camera</Text>
+                      <Camera size={48} color="#94a3b8" style={{ marginBottom: 12 }} />
+                      <Text style={styles.uploadText}>{t('staffCameraPreview') || "Camera Preview"}</Text>
+                      <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
+                        <TouchableOpacity style={[styles.chooseFileBtn, { backgroundColor: '#e2e8f0' }]}>
+                          <Text style={[styles.chooseFileText, { color: '#475569' }]}>{t('staffStartCamera') || "Start Camera"}</Text>
                         </TouchableOpacity>
                         <TouchableOpacity style={styles.chooseFileBtn}>
-                          <Text style={styles.chooseFileText}>Capture Scan</Text>
+                          <Text style={styles.chooseFileText}>{t('staffCaptureScan') || "Capture Scan"}</Text>
                         </TouchableOpacity>
                       </View>
                     </View>
                     <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
-                      <Save size={18} color="#fff" style={{marginRight: 8}}/>
-                      <Text style={styles.saveRxText}>Save Prescription</Text>
+                      <Save size={18} color="#fff" style={{ marginRight: 8 }} />
+                      <Text style={styles.saveRxText}>{t('staffSavePrescription') || "Save Prescription"}</Text>
                     </TouchableOpacity>
                   </View>
                 )}
+
               </View>
             )}
 
@@ -1267,36 +881,43 @@ export function StaffDashboard() {
         ) : (
           <View style={styles.emptyState}>
             <CheckCircle2 size={64} color="#22c55e" style={{ marginBottom: 16 }} />
-            <Text style={styles.emptyTitle}>Queue Clear</Text>
-            <Text style={styles.emptySub}>No patients are currently waiting in your department.</Text>
+            <Text style={styles.emptyTitle}>{t('staffQueueClear') || "Queue Clear"}</Text>
+            <Text style={styles.emptySub}>{t('staffNoPatientsWaiting') || "No patients waiting for consultation."}</Text>
           </View>
         )}
 
         {/* 5. UPCOMING QUEUE SECTION */}
         <View style={styles.queueSection}>
-          <Text style={styles.sectionTitle}>Upcoming Queue (Next {upcomingQueue.length})</Text>
-          {upcomingQueue.map((item) => (
-            <View key={item.id} style={styles.queueItem}>
-              <View style={[styles.smallTokenCircle, { backgroundColor: getPriorityColors(item.type).bg }]}>
-                <Text style={[styles.smallTokenText, { color: getPriorityColors(item.type).text }]}>
-                  {formatTokenId(item.id)}
-                </Text>
+          <Text style={styles.sectionTitle}>{t('staffUpcomingQueue') || "Upcoming Queue"} ({t('active').toLowerCase() || "all"} {upcomingQueue.length})</Text>
+          <ScrollView
+            style={styles.upcomingQueueScroll}
+            showsVerticalScrollIndicator={true}
+            nestedScrollEnabled={true}
+          >
+            {upcomingQueue.map((item) => (
+              <View key={item.id} style={styles.queueItem}>
+                <View style={[styles.smallTokenCircle, { backgroundColor: getPriorityColors(item.type).bg }]}>
+                  <Text style={[styles.smallTokenText, { color: getPriorityColors(item.type).text }]}>
+                    {formatTokenId(item.id)}
+                  </Text>
+                </View>
+                <View style={styles.queueItemInfo}>
+                  <Text style={styles.queueItemName}>{item.patient?.name || "Patient"}</Text>
+                  <Text style={styles.queueItemType}>{t(item.primaryDepartment === 'Emergency' ? 'pdEmergency' : item.primaryDepartment === 'Pediatrics' ? 'Pediatrics' : 'pdCommon') || item.primaryDepartment || "General"}</Text>
+                </View>
+                <View style={[styles.queueBadge, { borderColor: getPriorityColors(item.type).border }]}>
+                  <Text style={[styles.queueBadgeText, { color: getPriorityColors(item.type).text }]}>
+                    {t(item.type === 'emergency' ? 'emgEmergency' : item.type === 'disabled' ? 'pdDisabled' : 'pdCommon') || getPriorityColors(item.type).name}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.queueItemInfo}>
-                <Text style={styles.queueItemName}>{item.patient?.name || "Patient"}</Text>
-                <Text style={styles.queueItemType}>{item.primaryDepartment || "General"}</Text>
-              </View>
-              <View style={[styles.queueBadge, { borderColor: getPriorityColors(item.type).border }]}>
-                <Text style={[styles.queueBadgeText, { color: getPriorityColors(item.type).text }]}>
-                  {getPriorityColors(item.type).name}
-                </Text>
-              </View>
-            </View>
-          ))}
-          {upcomingQueue.length === 0 && (
-            <Text style={styles.emptyQueueText}>No upcoming patients.</Text>
-          )}
+            ))}
+            {upcomingQueue.length === 0 && (
+              <Text style={styles.emptyQueueText}>{t('staffNoUpcoming') || "No upcoming patients."}</Text>
+            )}
+          </ScrollView>
         </View>
+
 
       </ScrollView>
     </SafeAreaView>
@@ -1645,6 +1266,40 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: "center", justifyContent: "center", padding: 40, backgroundColor: "#fff", borderRadius: 16, marginBottom: 24, borderWidth: 1, borderColor: "#e2e8f0" },
   emptyTitle: { fontSize: 22, fontWeight: "700", color: "#0f172a", marginBottom: 8 },
   emptySub: { fontSize: 15, color: "#64748b", textAlign: "center" },
-  formLabel: { fontSize: 13, fontWeight: '600', color: '#475569', marginBottom: 4 },
-  formInput: { borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, backgroundColor: '#fff', color: '#1e293b' },
+  upcomingQueueScroll: { maxHeight: 350, marginTop: 4 },
+});
+
+// ─── EMERGENCY ALERTS STYLES ───
+const eaStyles = StyleSheet.create({
+  section: { marginBottom: 24 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#dc2626', textTransform: 'uppercase', letterSpacing: 0.5 },
+  alertCard: {
+    borderRadius: 14,
+    borderWidth: 2,
+    padding: 16,
+    marginBottom: 12,
+  },
+  alertHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  severityBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  severityBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800', letterSpacing: 1 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  statusBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  alertType: { fontSize: 18, fontWeight: '800', marginBottom: 4 },
+  patientName: { fontSize: 15, fontWeight: '600', color: '#1e293b', marginBottom: 8 },
+  conditionText: { fontSize: 13, color: '#475569', marginBottom: 10, lineHeight: 18, backgroundColor: 'rgba(255,255,255,0.6)', padding: 8, borderRadius: 8 },
+  detailsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  detailChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.7)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
+  detailChipText: { fontSize: 12, color: '#334155', fontWeight: '500' },
+  assistanceRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 8 },
+  assistanceLabel: { fontSize: 12, fontWeight: '600', color: '#64748b' },
+  assistanceText: { fontSize: 12, color: '#475569', flex: 1 },
+  timeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.06)' },
+  timeText: { fontSize: 11, color: '#64748b', fontWeight: '500' },
+  ackText: { fontSize: 11, color: '#2563eb', fontWeight: '600' },
+  actionsRow: { flexDirection: 'row', gap: 8 },
+  ackBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#2563eb', paddingVertical: 10, borderRadius: 10 },
+  inProgressBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#ea580c', paddingVertical: 10, borderRadius: 10 },
+  resolveBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#16a34a', paddingVertical: 10, borderRadius: 10 },
+  ackBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
 });

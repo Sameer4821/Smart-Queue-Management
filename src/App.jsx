@@ -59,7 +59,7 @@ function _interopRequireWildcard(e, t) {
         ((i =
           (o = Object.defineProperty) &&
           Object.getOwnPropertyDescriptor(e, _t)) &&
-        (i.get || i.set)
+          (i.get || i.set)
           ? o(f, _t, i)
           : (f[_t] = e[_t]));
     return f;
@@ -102,55 +102,55 @@ var deserializeTokens = function deserializeTokens(tokensJson) {
           ((_token$visits = token.visits) == null
             ? void 0
             : _token$visits.map(function (visit) {
-                var _visit$prescriptions, _visit$labTests;
-                return Object.assign({}, visit, {
-                  timestamp: new Date(visit.timestamp),
-                  prescriptions:
-                    ((_visit$prescriptions = visit.prescriptions) == null
-                      ? void 0
-                      : _visit$prescriptions.map(function (p) {
-                          return Object.assign({}, p, {
-                            prescribedAt: new Date(p.prescribedAt),
-                          });
-                        })) || [],
-                  labTests:
-                    ((_visit$labTests = visit.labTests) == null
-                      ? void 0
-                      : _visit$labTests.map(function (l) {
-                          return Object.assign({}, l, {
-                            orderedAt: new Date(l.orderedAt),
-                            scheduledAt: l.scheduledAt
-                              ? new Date(l.scheduledAt)
-                              : undefined,
-                            completedAt: l.completedAt
-                              ? new Date(l.completedAt)
-                              : undefined,
-                          });
-                        })) || [],
-                });
-              })) || [],
+              var _visit$prescriptions, _visit$labTests;
+              return Object.assign({}, visit, {
+                timestamp: new Date(visit.timestamp),
+                prescriptions:
+                  ((_visit$prescriptions = visit.prescriptions) == null
+                    ? void 0
+                    : _visit$prescriptions.map(function (p) {
+                      return Object.assign({}, p, {
+                        prescribedAt: new Date(p.prescribedAt),
+                      });
+                    })) || [],
+                labTests:
+                  ((_visit$labTests = visit.labTests) == null
+                    ? void 0
+                    : _visit$labTests.map(function (l) {
+                      return Object.assign({}, l, {
+                        orderedAt: new Date(l.orderedAt),
+                        scheduledAt: l.scheduledAt
+                          ? new Date(l.scheduledAt)
+                          : undefined,
+                        completedAt: l.completedAt
+                          ? new Date(l.completedAt)
+                          : undefined,
+                      });
+                    })) || [],
+              });
+            })) || [],
         prescriptions:
           ((_token$prescriptions = token.prescriptions) == null
             ? void 0
             : _token$prescriptions.map(function (p) {
-                return Object.assign({}, p, {
-                  prescribedAt: new Date(p.prescribedAt),
-                });
-              })) || [],
+              return Object.assign({}, p, {
+                prescribedAt: new Date(p.prescribedAt),
+              });
+            })) || [],
         labTests:
           ((_token$labTests = token.labTests) == null
             ? void 0
             : _token$labTests.map(function (l) {
-                return Object.assign({}, l, {
-                  orderedAt: new Date(l.orderedAt),
-                  scheduledAt: l.scheduledAt
-                    ? new Date(l.scheduledAt)
-                    : undefined,
-                  completedAt: l.completedAt
-                    ? new Date(l.completedAt)
-                    : undefined,
-                });
-              })) || [],
+              return Object.assign({}, l, {
+                orderedAt: new Date(l.orderedAt),
+                scheduledAt: l.scheduledAt
+                  ? new Date(l.scheduledAt)
+                  : undefined,
+                completedAt: l.completedAt
+                  ? new Date(l.completedAt)
+                  : undefined,
+              });
+            })) || [],
         // Ensure departmentAccess exists and has all departments if missing
         departmentAccess: token.departmentAccess || allDepartments,
         // Ensure patient has required fields
@@ -220,6 +220,13 @@ function AppContent() {
         var savedEmergencyCount = yield _asyncStorage.default.getItem(
           "emergency-count-" + new Date().toDateString(),
         );
+        var savedLanguage = yield _asyncStorage.default.getItem("hospital-language");
+
+        if (savedLanguage) {
+          setState(function (prev) {
+            return Object.assign({}, prev, { language: savedLanguage });
+          });
+        }
 
         if (savedTokens) {
           try {
@@ -246,197 +253,139 @@ function AppContent() {
       };
     })();
     loadData();
-    
+
     // Initial fetch from Supabase queue table to populate active non-completed queues for everyone
     var initQueue = /*#__PURE__*/ (function () {
       var _refQ = (0, _asyncToGenerator2.default)(function* () {
-         var _yield$supabase$from = yield _supabaseClient.supabase.from('queue').select('*').neq('status', 'completed').order('created_at', { ascending: true }), data = _yield$supabase$from.data, error = _yield$supabase$from.error;
-         if (!error && data) {
-             setState(function(prev) {
-                 var updatedTokens = (0, _toConsumableArray2.default)(prev.tokens);
-                 var seenTokenIds = new Set(updatedTokens.map(function (t) { return t.id; }));
-                 data.forEach(function(row) {
-                     if (seenTokenIds.has(row.token_id)) return;
-                     seenTokenIds.add(row.token_id);
-                     var exists = updatedTokens.find(function(t) { return t.id === row.token_id; });
-                     if (!exists) {
-                         // Build a rich local token object mapped from the flat SQL row
-                         updatedTokens.push({
-                            id: row.token_id,
-                            type: row.token_id && row.token_id.startsWith('EME') ? 'emergency' : row.token_id && row.token_id.startsWith('ACE') ? 'disabled' : 'common',
-                            primaryDepartment: row.department,
-                            status: 'active', // 'active' corresponds to 'waiting' or 'called' mostly in this app
-                            timestamp: new Date(row.created_at),
-                            validUntil: new Date(new Date(row.created_at).getTime() + 24 * 3600000),
-                            departmentAccess: [row.department],
-                            patient: {
-                                name: row.patient_name,
-                                email: '',
-                                phone: '',
-                                age: 0,
-                                gender: 'not specified',
-                                patientId: `PAT-${Date.now()}`
-                            },
-                            visits: [],
-                            prescriptions: [],
-                            labTests: []
-                         });
-                     } else {
-                         // Update status if it changed via real-time logic while app was partially unloaded
-                         if (row.status === 'completed' || row.status === 'called') {
-                             exists.status = row.status === 'completed' ? 'completed' : 'active';
-                             if (!exists.visits) exists.visits = [];
-                         }
-                     }
-                 });
-                 return Object.assign({}, prev, { tokens: updatedTokens });
-             });
-         }
+        var _yield$supabase$from = yield _supabaseClient.supabase.from('queue').select('*').neq('status', 'completed').order('created_at', { ascending: true }), data = _yield$supabase$from.data, error = _yield$supabase$from.error;
+        if (!error && data) {
+          setState(function (prev) {
+            var updatedTokens = (0, _toConsumableArray2.default)(prev.tokens);
+            data.forEach(function (row) {
+              var exists = updatedTokens.find(function (t) { return t.id === row.token_id; });
+              if (!exists) {
+                // Build a rich local token object mapped from the flat SQL row
+                updatedTokens.push({
+                  id: row.token_id,
+                  type: row.token_id && row.token_id.startsWith('EME') ? 'emergency' : row.token_id && row.token_id.startsWith('ACE') ? 'disabled' : 'common',
+                  primaryDepartment: row.department,
+                  status: 'active', // 'active' corresponds to 'waiting' or 'called' mostly in this app
+                  timestamp: new Date(row.created_at),
+                  validUntil: new Date(new Date(row.created_at).getTime() + 24 * 3600000),
+                  departmentAccess: [row.department],
+                  patient: {
+                    name: row.patient_name,
+                    email: '',
+                    phone: '',
+                    age: 0,
+                    gender: 'not specified',
+                    patientId: `PAT-${Date.now()}`
+                  },
+                  visits: [],
+                  prescriptions: [],
+                  labTests: []
+                });
+              } else {
+                // Update status if it changed via real-time logic while app was partially unloaded
+                if (row.status === 'completed' || row.status === 'called') {
+                  exists.status = row.status === 'completed' ? 'completed' : 'active';
+                  if (!exists.visits) exists.visits = [];
+                }
+              }
+            });
+            return Object.assign({}, prev, { tokens: updatedTokens });
+          });
+        }
       });
       return function initQueue() { return _refQ.apply(this, arguments); };
     })();
     initQueue();
-    
-    // Subscribe to real-time events on the 'queue' table and 'queue_visits' table
+
+    // Subscribe to real-time events on the 'queue' table
     var queueSubscription = _supabaseClient.supabase.channel('public:queue')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, function(payload) {
-            if (payload.eventType === 'INSERT') {
-                setState(function(prev) {
-                    var exists = prev.tokens.find(function(t) { return t.id === payload.new.token_id; });
-                    if (exists) return prev; // If current device made the token, it's already richly populated locally
-                    
-                    var newRichToken = {
-                        id: payload.new.token_id,
-                        type: payload.new.token_id && payload.new.token_id.startsWith('EME') ? 'emergency' : payload.new.token_id && payload.new.token_id.startsWith('ACE') ? 'disabled' : 'common',
-                        primaryDepartment: payload.new.department,
-                        status: 'active',
-                        timestamp: new Date(payload.new.created_at),
-                        validUntil: new Date(new Date().getTime() + 24 * 3600000),
-                        departmentAccess: [payload.new.department],
-                        patient: {
-                            name: payload.new.patient_name,
-                            email: '', phone: '', age: 0, gender: 'not specified', patientId: `PAT-${Date.now()}`
-                        },
-                        visits: [], prescriptions: [], labTests: []
-                    };
-                    return Object.assign({}, prev, { tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens), [newRichToken]) });
-                });
-            } else if (payload.eventType === 'UPDATE') {
-                setState(function(prev) {
-                    return Object.assign({}, prev, { tokens: prev.tokens.map(function(t) {
-                        return t.id === payload.new.token_id 
-                            ? Object.assign({}, t, { status: payload.new.status === 'completed' ? 'completed' : 'active' })
-                            : t;
-                    })});
-                });
-            }
-        }).subscribe();
-        
-    var visitsChannel = _supabaseClient.supabase.channel('public:queue_visits')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'queue_visits' }, function(payload) {
-            if (payload.eventType === 'INSERT') {
-                var newVisit = payload.new;
-                setState(function(prev) {
-                    return Object.assign({}, prev, {
-                        tokens: prev.tokens.map(function(t) {
-                            if (t.id === newVisit.token_id) {
-                                t.visits = t.visits || [];
-                                const existingVisitIndex = t.visits.findIndex(v => v.id === newVisit.id || (v.department_id === newVisit.department_id && String(v.id).startsWith('visit-')));
-                                
-                                const formattedVisit = {
-                                    id: newVisit.id,
-                                    department_id: newVisit.department_id,
-                                    department: newVisit.department_id === 'gen_med' ? 'General Medicine' : 
-                                                newVisit.department_id === 'cardio' ? 'Cardiology' :
-                                                newVisit.department_id === 'ent' ? 'ENT' :
-                                                newVisit.department_id === 'ortho' ? 'Orthopedics' :
-                                                newVisit.department_id === 'lab' ? 'Laboratory' :
-                                                newVisit.department_id === 'pharm' ? 'Pharmacy' : newVisit.department_id,
-                                    status: newVisit.status,
-                                    room_counter: newVisit.room_counter,
-                                    doctorName: null,
-                                    notes: newVisit.notes,
-                                    timestamp: newVisit.created_at
-                                };
-                                
-                                let nextToken = t;
-                                let updatedVisits;
-                                if (existingVisitIndex !== -1) {
-                                    // Replace the temporary visit with the DB confirmed visit
-                                    updatedVisits = (0, _toConsumableArray2.default)(t.visits);
-                                    updatedVisits[existingVisitIndex] = Object.assign({}, updatedVisits[existingVisitIndex], formattedVisit);
-                                } else {
-                                    // Append new visit
-                                    updatedVisits = [].concat(t.visits, [formattedVisit]);
-                                }
-                                updatedVisits.sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
-                                nextToken = Object.assign({}, t, { visits: updatedVisits });
-                                
-                                if (prev.currentToken && prev.currentToken.id === t.id) {
-                                    // Force currentToken sync
-                                    setTimeout(() => {
-                                        setState(curr => Object.assign({}, curr, { currentToken: Object.assign({}, curr.currentToken, { visits: updatedVisits }) }));
-                                    }, 0);
-                                }
-                                
-                                return nextToken;
-                            }
-                            return t;
-                        })
-                    });
-                });
-            } else if (payload.eventType === 'UPDATE') {
-                const updatedVisit = payload.new;
-                setState(function(prev) {
-                    const newTokens = prev.tokens.map(function(t) {
-                        if (t.id === updatedVisit.token_id) {
-                            const updatedVisits = (t.visits || []).map(v => {
-                                if (v.id === updatedVisit.id) {
-                                    return Object.assign({}, v, {
-                                        status: updatedVisit.status,
-                                        room_counter: updatedVisit.room_counter,
-                                        notes: updatedVisit.notes
-                                    });
-                                }
-                                return v;
-                            });
-                            
-                            if (prev.currentToken && prev.currentToken.id === t.id) {
-                                setTimeout(() => {
-                                    setState(curr => Object.assign({}, curr, { currentToken: Object.assign({}, curr.currentToken, { visits: updatedVisits }) }));
-                                }, 0);
-                            }
-                            
-                            return Object.assign({}, t, { visits: updatedVisits });
-                        }
-                        return t;
-                    });
-                    return Object.assign({}, prev, { tokens: newTokens });
-                });
-            } else if (payload.eventType === 'DELETE') {
-                const deletedVisit = payload.old;
-                setState(function(prev) {
-                    return Object.assign({}, prev, {
-                        tokens: prev.tokens.map(function(t) {
-                            if (t.id === deletedVisit.token_id) {
-                                const updatedVisits = (t.visits || []).filter(v => v.id !== deletedVisit.id);
-                                if (prev.currentToken && prev.currentToken.id === t.id) {
-                                    setTimeout(() => {
-                                        setState(curr => Object.assign({}, curr, { currentToken: Object.assign({}, curr.currentToken, { visits: updatedVisits }) }));
-                                    }, 0);
-                                }
-                                return Object.assign({}, t, { visits: updatedVisits });
-                            }
-                            return t;
-                        })
-                    });
-                });
-            }
-        }).subscribe();
-        
-    return function() {
-        _supabaseClient.supabase.removeChannel(queueSubscription);
-        _supabaseClient.supabase.removeChannel(visitsChannel);
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, function (payload) {
+        if (payload.eventType === 'INSERT') {
+          setState(function (prev) {
+            var exists = prev.tokens.find(function (t) { return t.id === payload.new.token_id; });
+            if (exists) return prev; // If current device made the token, it's already richly populated locally
+
+            var newRichToken = {
+              id: payload.new.token_id,
+              type: payload.new.token_id && payload.new.token_id.startsWith('EME') ? 'emergency' : payload.new.token_id && payload.new.token_id.startsWith('ACE') ? 'disabled' : 'common',
+              primaryDepartment: payload.new.department,
+              status: 'active',
+              timestamp: new Date(payload.new.created_at),
+              validUntil: new Date(new Date().getTime() + 24 * 3600000),
+              departmentAccess: [payload.new.department],
+              patient: {
+                name: payload.new.patient_name,
+                email: '', phone: '', age: 0, gender: 'not specified', patientId: `PAT-${Date.now()}`
+              },
+              visits: [], prescriptions: [], labTests: []
+            };
+            return Object.assign({}, prev, { tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens), [newRichToken]) });
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          setState(function (prev) {
+            return Object.assign({}, prev, {
+              tokens: prev.tokens.map(function (t) {
+                return t.id === payload.new.token_id
+                  ? Object.assign({}, t, { status: payload.new.status === 'completed' ? 'completed' : 'active' })
+                  : t;
+              })
+            });
+          });
+        }
+      }).subscribe();
+
+    // Initial fetch of active emergency alerts from Supabase
+    var initEmergencyAlerts = /*#__PURE__*/ (function () {
+      var _refE = (0, _asyncToGenerator2.default)(function* () {
+        var _yield$supabase$ea = yield _supabaseClient.supabase.from('emergency_alerts').select('*').neq('alert_status', 'resolved').order('created_at', { ascending: true }), data = _yield$supabase$ea.data, error = _yield$supabase$ea.error;
+        if (!error && data) {
+          setState(function (prev) {
+            var existing = prev.emergencyAlerts || [];
+            var merged = (0, _toConsumableArray2.default)(existing);
+            data.forEach(function (alert) {
+              var exists = merged.find(function (a) { return a.alert_id === alert.alert_id; });
+              if (!exists) {
+                merged.push(alert);
+              }
+            });
+            return Object.assign({}, prev, { emergencyAlerts: merged });
+          });
+        }
+      });
+      return function initEmergencyAlerts() { return _refE.apply(this, arguments); };
+    })();
+    initEmergencyAlerts();
+
+    // Subscribe to real-time events on the 'emergency_alerts' table
+    var emergencyAlertSubscription = _supabaseClient.supabase.channel('public:emergency_alerts')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'emergency_alerts' }, function (payload) {
+        if (payload.eventType === 'INSERT') {
+          setState(function (prev) {
+            var existing = prev.emergencyAlerts || [];
+            var exists = existing.find(function (a) { return a.alert_id === payload.new.alert_id; });
+            if (exists) return prev;
+            return Object.assign({}, prev, { emergencyAlerts: [].concat((0, _toConsumableArray2.default)(existing), [payload.new]) });
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          setState(function (prev) {
+            return Object.assign({}, prev, {
+              emergencyAlerts: (prev.emergencyAlerts || []).map(function (a) {
+                return a.alert_id === payload.new.alert_id
+                  ? Object.assign({}, a, payload.new)
+                  : a;
+              })
+            });
+          });
+        }
+      }).subscribe();
+
+    return function () {
+      _supabaseClient.supabase.removeChannel(queueSubscription);
+      _supabaseClient.supabase.removeChannel(emergencyAlertSubscription);
     };
   }, []);
 
@@ -553,6 +502,31 @@ function AppContent() {
       saveInfo();
     },
     [state.patientInfo],
+  );
+
+  // Save language to AsyncStorage whenever it changes
+  (0, _react.useEffect)(
+    function () {
+      var saveLanguage = /*#__PURE__*/ (function () {
+        var _refLang = (0, _asyncToGenerator2.default)(function* () {
+          if (state.language) {
+            try {
+              yield _asyncStorage.default.setItem(
+                "hospital-language",
+                state.language,
+              );
+            } catch (error) {
+              console.error("Error saving language:", error);
+            }
+          }
+        });
+        return function saveLanguage() {
+          return _refLang.apply(this, arguments);
+        };
+      })();
+      saveLanguage();
+    },
+    [state.language],
   );
 
   // Apply theme changes
@@ -686,16 +660,16 @@ function AppContent() {
         tokens: prev.tokens.map(function (token) {
           return token.id === tokenId
             ? Object.assign(
-                {},
+              {},
 
-                token,
-                {
-                  visits: [].concat(
-                    (0, _toConsumableArray2.default)(token.visits || []),
-                    [newVisit],
-                  ),
-                },
-              )
+              token,
+              {
+                visits: [].concat(
+                  (0, _toConsumableArray2.default)(token.visits || []),
+                  [newVisit],
+                ),
+              },
+            )
             : token;
         }),
       });
@@ -715,16 +689,16 @@ function AppContent() {
         tokens: prev.tokens.map(function (token) {
           return token.id === tokenId
             ? Object.assign(
-                {},
+              {},
 
-                token,
-                {
-                  prescriptions: [].concat(
-                    (0, _toConsumableArray2.default)(token.prescriptions || []),
-                    [newPrescription],
-                  ),
-                },
-              )
+              token,
+              {
+                prescriptions: [].concat(
+                  (0, _toConsumableArray2.default)(token.prescriptions || []),
+                  [newPrescription],
+                ),
+              },
+            )
             : token;
         }),
       });
@@ -741,16 +715,16 @@ function AppContent() {
         tokens: prev.tokens.map(function (token) {
           return token.id === tokenId
             ? Object.assign(
-                {},
+              {},
 
-                token,
-                {
-                  labTests: [].concat(
-                    (0, _toConsumableArray2.default)(token.labTests || []),
-                    [newLabTest],
-                  ),
-                },
-              )
+              token,
+              {
+                labTests: [].concat(
+                  (0, _toConsumableArray2.default)(token.labTests || []),
+                  [newLabTest],
+                ),
+              },
+            )
             : token;
         }),
       });
@@ -814,6 +788,7 @@ function AppContent() {
           {},
         );
       case "emergency":
+      case "emergency-alert-confirmed":
         return /*#__PURE__*/ (0, _jsxRuntime.jsx)(
           _EmergencyUserFlow.EmergencyUserFlow,
           {},
@@ -830,19 +805,19 @@ function AppContent() {
       case "consultation-completed":
         return state.consultationData /*#__PURE__*/
           ? (0, _jsxRuntime.jsx)(_ConsultationCompleted.ConsultationCompleted, {
-              visitData: state.consultationData,
-              onClose: function onClose() {
-                return setState(function (prev) {
-                  return Object.assign({}, prev, {
-                    consultationData: undefined,
-                  });
+            visitData: state.consultationData,
+            onClose: function onClose() {
+              return setState(function (prev) {
+                return Object.assign({}, prev, {
+                  consultationData: undefined,
                 });
-              },
-            }) /*#__PURE__*/
+              });
+            },
+          }) /*#__PURE__*/
           : (0, _jsxRuntime.jsx)(
-              _MedicalServicesDashboard.PatientDashboard,
-              {},
-            );
+            _MedicalServicesDashboard.PatientDashboard,
+            {},
+          );
 
       default:
         return /*#__PURE__*/ (0, _jsxRuntime.jsx)(
@@ -941,52 +916,52 @@ function AppContent() {
           style: styles.appContainer,
           children: [
             state.notifications.length > 0 /*#__PURE__*/ &&
-              (0, _jsxRuntime.jsx)(_reactNative.View, {
-                style: styles.notificationPanel,
-                children: state.notifications.map(function (notification) {
-                  return (
-                    /*#__PURE__*/
-                    (0, _jsxRuntime.jsxs)(
-                      _reactNative.View,
-                      {
-                        style: [
-                          styles.notificationItem,
-                          notification.type === "emergency"
-                            ? styles.bgRed
-                            : notification.type === "warning"
-                              ? styles.bgYellow
-                              : styles.bgBlue,
-                        ],
-                        children: [
-                          /*#__PURE__*/
+            (0, _jsxRuntime.jsx)(_reactNative.View, {
+              style: styles.notificationPanel,
+              children: state.notifications.map(function (notification) {
+                return (
+                  /*#__PURE__*/
+                  (0, _jsxRuntime.jsxs)(
+                    _reactNative.View,
+                    {
+                      style: [
+                        styles.notificationItem,
+                        notification.type === "emergency"
+                          ? styles.bgRed
+                          : notification.type === "warning"
+                            ? styles.bgYellow
+                            : styles.bgBlue,
+                      ],
+                      children: [
+                        /*#__PURE__*/
 
-                          (0, _jsxRuntime.jsx)(_reactNative.Text, {
-                            style: styles.notificationTitle,
-                            children:
-                              notification.type === "emergency"
-                                ? "🚨 Emergency Alert"
-                                : notification.type === "warning"
-                                  ? "⚠️ Warning"
-                                  : "ℹ️ Information",
-                          }) /*#__PURE__*/,
-                          (0, _jsxRuntime.jsx)(_reactNative.Text, {
-                            style: styles.notificationMessage,
-                            children: notification.message,
-                          }),
-                        ],
-                      },
-                      notification.id,
-                    )
-                  );
-                }),
+                        (0, _jsxRuntime.jsx)(_reactNative.Text, {
+                          style: styles.notificationTitle,
+                          children:
+                            notification.type === "emergency"
+                              ? "🚨 Emergency Alert"
+                              : notification.type === "warning"
+                                ? "⚠️ Warning"
+                                : "ℹ️ Information",
+                        }) /*#__PURE__*/,
+                        (0, _jsxRuntime.jsx)(_reactNative.Text, {
+                          style: styles.notificationMessage,
+                          children: notification.message,
+                        }),
+                      ],
+                    },
+                    notification.id,
+                  )
+                );
               }),
+            }),
 
             state.currentView === "portal"
               ? renderCurrentView() /*#__PURE__*/
               : (0, _jsxRuntime.jsx)(_reactNative.View, {
-                  style: styles.contentContainer,
-                  children: renderCurrentView(),
-                }),
+                style: styles.contentContainer,
+                children: renderCurrentView(),
+              }),
 
             (0, _jsxRuntime.jsx)(_sonnerNative.Toaster, {}),
           ],
