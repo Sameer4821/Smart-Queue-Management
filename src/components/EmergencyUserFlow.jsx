@@ -354,11 +354,11 @@ function EmergencyUserFlow() {
 
                                 (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                     children: [/*#__PURE__*/
-                                        (0, _jsxRuntime.jsx)(_label.Label, { children: "Symptoms / లక్షణాలు" }),/*#__PURE__*/
+                                        (0, _jsxRuntime.jsx)(_label.Label, { children: t.symptoms || "Symptoms" }),/*#__PURE__*/
                                         (0, _jsxRuntime.jsx)(_input.Input, {
                                             value: formData.symptoms,
                                             onChangeText: function onChangeText(val) { return setFormData(Object.assign({}, formData, { symptoms: val })); },
-                                            placeholder: "Describe your symptoms (e.g., fever, cough)"
+                                            placeholder: t.symptomsPlaceholder || "Describe your symptoms"
                                         })]
                                 }),/*#__PURE__*/
 

@@ -115,7 +115,9 @@ export const translations = {
         lpTitle: 'Smart Hospital Queue System', lpSubtitle: 'Government Hospital - Multi-Department Access', lpWelcome: 'Welcome to Hospital Services', lpGetStarted: 'Get started with your hospital visit', lpPatientPortal: 'Patient Portal', lpPatientDesc: 'Access all hospital departments with a single token', lpContinue: 'Continue as Patient', lpLanguage: 'Language', lpAccessibility: 'Accessibility', lpNormal: 'Normal', lpHighContrast: 'High Contrast', lpVoiceAssist: 'Voice Assist', lpFeatures: 'Token Features', lpFeature1: 'Single token for all departments', lpFeature2: 'Lab, Pharmacy, Consultation access', lpFeature3: 'Digital prescriptions & test results', lpFeature4: 'No need to repeat information',
         dsTitle: 'Department Information', dsSubtitle: 'Overview of hospital departments and staff', dsAvailableDoctors: 'Medical Staff', dsExperience: 'yrs exp', dsServices: 'Services Offered', dsHospitalInfo: 'Hospital Information', dsOperatingHours: 'Operating Hours', dsEmergencyServices: 'Emergency Services', dsLocation: 'Location', dsContact: 'Contact Information', dsDepartments: 'Departments', dsTotalStaff: 'Total Staff', dsSpecializations: 'Specializations', dsHours24x7: '24×7 Available', dsBusinessHours: '6:00 AM - 10:00 PM', dsGenName: 'Government District Hospital', dsGenAddress: '123 Medical Campus, City - 400001', dsGenPhone: '+91-22-1234-5678', dsGenEmail: 'info@govthospital.in', dsGenEmergency: '+91-22-1234-1100',
         dsDoctorStatus: { available: 'Available', busy: 'Busy', offline: 'Offline' },
-        dsDepartmentTypes: { consultation: 'Consultation', diagnostic: 'Diagnostic', pharmacy: 'Pharmacy', administrative: 'Administrative' }
+        dsDepartmentTypes: { consultation: 'Consultation', diagnostic: 'Diagnostic', pharmacy: 'Pharmacy', administrative: 'Administrative' },
+        symptoms: "Symptoms",
+        symptomsPlaceholder: "Describe your symptoms (e.g., fever, cough)"
     },
 
     hi: {
@@ -190,7 +192,9 @@ export const translations = {
         lpTitle: 'स्मार्ट अस्पताल क्यू सिस्टम', lpSubtitle: 'सरकारी अस्पताल - मल्टी-डिपार्टमेंट एक्सेस', lpWelcome: 'अस्पताल सेवाओं में आपका स्वागत है', lpGetStarted: 'अपने अस्पताल की यात्रा शुरू करें', lpPatientPortal: 'मरीज़ पोर्टल', lpPatientDesc: 'एक ही टोकन से सभी अस्पताल विभागों तक पहुंच', lpContinue: 'मरीज़ के रूप में जारी रखें', lpLanguage: 'भाषा', lpAccessibility: 'सुगम्यता', lpNormal: 'सामान्य', lpHighContrast: 'उच्च कंट्रास्ट', lpVoiceAssist: 'आवाज़ सहायता', lpFeatures: 'टोकन सुविधाएं', lpFeature1: 'सभी विभागों के लिए एक टोकन', lpFeature2: 'लैब, फार्मेसी, परामर्श पहुंच', lpFeature3: 'डिजिटल प्रिस्क्रिप्शन और परीक्षा परिणाम', lpFeature4: 'जानकारी दोहराने की जरूरत नहीं',
         dsTitle: 'विभाग जानकारी', dsSubtitle: 'अस्पताल विभागों और कर्मचारियों का अवलोकन', dsAvailableDoctors: 'चिकित्सा कर्मचारी', dsExperience: 'वर्ष अनुभव', dsServices: 'प्रदान की जाने वाली सेवाएं', dsHospitalInfo: 'अस्पताल की जानकारी', dsOperatingHours: 'संचालन के घंटे', dsEmergencyServices: 'आपातकालीन सेवाएं', dsLocation: 'स्थान', dsContact: 'संपर्क जानकारी', dsDepartments: 'विभाग', dsTotalStaff: 'कुल कर्मचारी', dsSpecializations: 'विशेषज्ञताएं', dsHours24x7: '24×7 उपलब्ध', dsBusinessHours: 'सुबह 6:00 - रात 10:00', dsGenName: 'सरकारी जिला अस्पताल', dsGenAddress: '123 मेडिकल कैंपस, शहर - 400001', dsGenPhone: '+91-22-1234-5678', dsGenEmail: 'info@govthospital.in', dsGenEmergency: '+91-22-1234-1100',
         dsDoctorStatus: { available: 'उपलब्ध', busy: 'व्यस्त', offline: 'ऑफ़लाइन' },
-        dsDepartmentTypes: { consultation: 'परामर्श', diagnostic: 'निदान', pharmacy: 'फ़ार्मेसी', administrative: 'प्रशासनिक' }
+        dsDepartmentTypes: { consultation: 'परामर्श', diagnostic: 'निदान', pharmacy: 'फ़ार्मेसी', administrative: 'प्रशासनिक' },
+        symptoms: "लक्षण",
+        symptomsPlaceholder: "अपने लक्षणों का वर्णन करें (जैसे, बुखार, खांसी)"
     },
 
     mr: {
@@ -220,7 +224,9 @@ export const translations = {
         queuePosition: "रांगेत स्थान",
         minutes: "मिनिटे",
         acceptOptimal: "योग्य वेळ स्वीकारा",
-        customizeTime: "वेगळी वेळ निवडा"
+        customizeTime: "वेगळी वेळ निवडा",
+        symptoms: "लक्षणे",
+        symptomsPlaceholder: "आपल्या लक्षणांचे वर्णन करा (उदा. ताप, खोकला)"
     },
 
     ta: {
@@ -250,7 +256,9 @@ export const translations = {
         queuePosition: "வரிசை நிலை",
         minutes: "நிமிடங்கள்",
         acceptOptimal: "உகந்த நேரத்தை ஏற்கவும்",
-        customizeTime: "வெவ்வேறு நேரத்தைத் தேர்ந்தெடுக்கவும்"
+        customizeTime: "வெவ்வேறு நேரத்தைத் தேர்ந்தெடுக்கவும்",
+        symptoms: "அறிகுறிகள்",
+        symptomsPlaceholder: "உங்கள் அறிகுறிகளை விவரிக்கவும் (எ.கா., காய்ச்சல், இருமல்)"
     },
 
     te: {
@@ -280,7 +288,9 @@ export const translations = {
         queuePosition: "క్యూ స్థానం",
         minutes: "నిమిషాలు",
         acceptOptimal: "సరైన సమయాన్ని అంగీకరించండి",
-        customizeTime: "వేరే సమయాన్ని ఎంచుకోండి"
+        customizeTime: "వేరే సమయాన్ని ఎంచుకోండి",
+        symptoms: "లక్షణాలు",
+        symptomsPlaceholder: "మీ లక్షణాలను వివరించండి (ఉదా. జ్వరం, దగ్గు)"
     },
 
     bn: {
@@ -310,6 +320,8 @@ export const translations = {
         queuePosition: "কিউ অবস্থান",
         minutes: "মিনিট",
         acceptOptimal: "অনুকূল সময় গ্রহণ করুন",
-        customizeTime: "ভিন্ন সময় নির্বাচন করুন"
+        customizeTime: "ভিন্ন সময় নির্বাচন করুন",
+        symptoms: "লক্ষণসমূহ",
+        symptomsPlaceholder: "আপনার উপসর্গগুলি বর্ণনা করুন (যেমন, জ্বর, কাশি)"
     }
 };
