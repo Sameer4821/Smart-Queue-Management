@@ -129,19 +129,26 @@ export function StaffDashboard() {
     return () => clearInterval(tick);
   }, []);
 
-  // Fetch patient records when Patient Records tab is opened
+  // Fetch patient records from Firestore when Patient Records tab is opened
   const fetchRecords = async () => {
     setLoadingRecords(true);
     try {
-      const { data, error } = await supabase
-        .from('queue')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (!error && data) {
-        setDbRecords(data);
-      }
+      const querySnapshot = await getDocs(collection(db, 'tokens'));
+      const recordsData = [];
+      querySnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        recordsData.push({
+          token_id: data.id || data.token_id || docSnap.id,
+          patient_name: data.patient?.name || data.patient_name || 'Walk-in Patient',
+          department: data.primaryDepartment || data.department || 'General',
+          doctor_id: data.assignedDoctor || null,
+          status: data.status === 'completed' ? 'completed' : 'active',
+          created_at: data.createdAt || data.timestamp || new Date().toISOString()
+        });
+      });
+      setDbRecords(recordsData);
     } catch (err) {
-      console.error("Error fetching patient records:", err);
+      console.error("Error fetching patient records from Firestore:", err);
     } finally {
       setLoadingRecords(false);
     }
@@ -165,42 +172,34 @@ export function StaffDashboard() {
 
   // Firestore Real-Time Sync for Token Queue
   useEffect(() => {
-    const channel = supabase.channel('public:queue_sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, (payload) => {
-        if (payload.eventType === 'INSERT') {
-          const newRow = payload.new;
-          const mappedToken = {
-             id: newRow.token_id,
-             type: newRow.token_id && newRow.token_id.startsWith('EME') ? 'emergency' : newRow.token_id && newRow.token_id.startsWith('ACE') ? 'disabled' : 'common',
-             primaryDepartment: newRow.department,
-             timestamp: newRow.created_at ? new Date(newRow.created_at) : new Date(),
-             patient: {
-                name: newRow.patient_name || 'Walk-in Patient',
-             },
-             status: newRow.status || 'active',
-             qrCode: newRow.token_id
-          };
+    const tokensRef = collection(db, 'tokens');
+    const unsubscribe = onSnapshot(tokensRef, (snapshot) => {
+      const tokensList = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        const tokenId = data.id || data.token_id || docSnap.id;
+        tokensList.push({
+          id: tokenId,
+          type: data.type || (tokenId && tokenId.startsWith('EME') ? 'emergency' : tokenId && tokenId.startsWith('ACE') ? 'disabled' : 'common'),
+          primaryDepartment: data.primaryDepartment || data.department || 'General',
+          timestamp: data.createdAt ? new Date(data.createdAt) : new Date(),
+          patient: data.patient || { name: data.patient_name || 'Patient' },
+          status: data.status === 'completed' ? 'completed' : 'active',
+          qrCode: tokenId
+        });
+      });
 
-          setAppState(prev => {
-             const exists = prev.tokens.find(t => t.id === mappedToken.id);
-             if (exists) return prev;
-             return { ...prev, tokens: [...prev.tokens, mappedToken] };
-          });
-        } 
-        else if (payload.eventType === 'UPDATE') {
-          setAppState(prev => ({
-             ...prev,
-             tokens: prev.tokens.map(t => t.id === payload.new.token_id ? { ...t, status: payload.new.status } : t)
-          }));
-        } 
-        else if (payload.eventType === 'DELETE') {
-          setAppState(prev => ({
-             ...prev,
-             tokens: prev.tokens.filter(t => t.id !== payload.old.token_id)
-          }));
-        }
-      })
-      .subscribe();
+      if (tokensList.length > 0) {
+        setAppState(prev => {
+          const map = new Map();
+          prev.tokens.forEach(t => map.set(t.id, t));
+          tokensList.forEach(t => map.set(t.id, { ...map.get(t.id), ...t }));
+          return { ...prev, tokens: Array.from(map.values()) };
+        });
+      }
+    }, (err) => {
+      console.error("Firestore StaffDashboard subscription error:", err);
+    });
 
     return () => unsubscribe();
   }, []);
@@ -2071,3 +2070,5 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 });
+
+export default StaffDashboard;

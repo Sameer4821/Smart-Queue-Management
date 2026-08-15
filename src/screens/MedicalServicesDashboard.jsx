@@ -13,7 +13,6 @@ var _badge = require("../components/ui/badge");
 
 var _lucideReactNative = require("lucide-react-native");
 var _asyncStorage = _interopRequireDefault(require("@react-native-async-storage/async-storage")); 
-var _supabaseClient = require("../services/supabaseClient");
 var _jsxRuntime = require("react/jsx-runtime"); function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }// import { Progress } from './ui/progress';
 
 
@@ -43,18 +42,21 @@ function PatientDashboard() {
         var activeToken = state.tokens.find(function (t) { return t.patient.email === state.patientInfo.email && t.status === 'active'; });
         if (!activeToken) return;
 
-        var setPrescriptionFromPayload = function(payload) {
-            if (payload.new && payload.new.token_id === activeToken.id) {
-                setLatestPrescription(payload.new);
-            }
-        };
+        var q = (0, _firebase.query)(
+            (0, _firebase.collection)(_firebase.db, 'prescriptions'),
+            (0, _firebase.where)('token_id', '==', activeToken.id)
+        );
 
-        var channel = _supabaseClient.supabase.channel('public:prescriptions')
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'prescriptions', filter: 'patient_id=eq.' + patientId }, setPrescriptionFromPayload)
-            .subscribe();
+        var unsubscribe = (0, _firebase.onSnapshot)(q, function(snapshot) {
+            snapshot.forEach(function(docSnap) {
+                setLatestPrescription(docSnap.data());
+            });
+        }, function(err) {
+            console.error("Firestore MedicalServicesDashboard prescription sub error:", err);
+        });
 
         return function() {
-            _supabaseClient.supabase.removeChannel(channel);
+            unsubscribe();
         };
     }, [state.patientInfo, state.tokens]);
 

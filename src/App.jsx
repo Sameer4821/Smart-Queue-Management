@@ -28,6 +28,7 @@ var _PatientPortal = require("./components/PatientPortal");
 var _PatientRegistrationScreen = require("./screens/PatientRegistrationScreen");
 var _OTPVerificationScreen = require("./screens/OTPVerificationScreen");
 var _StaffLoginScreen = require("./screens/StaffLoginScreen");
+var _StaffDashboard = _interopRequireDefault(require("./screens/StaffDashboard"));
 var _MedicalServicesDashboard = require("./screens/MedicalServicesDashboard");
 var _CommonUserFlow = require("./components/CommonUserFlow");
 var _EmergencyUserFlow = require("./components/EmergencyUserFlow");
@@ -634,7 +635,7 @@ var _firebase = require("./services/firebase");
         );
       case "staff-dashboard":
         return /*#__PURE__*/ (0, _jsxRuntime.jsx)(
-          _StaffDashboard.StaffDashboard,
+          _StaffDashboard.default || _StaffDashboard.StaffDashboard || _StaffDashboard,
           {},
         );
       case "patient-dashboard":
