@@ -8,11 +8,16 @@ import { toast } from 'sonner-native';
 import { useAppContext } from '../context/AppContext';
 import { auth, db, doc, setDoc, getDoc, signInWithPhoneNumber, RecaptchaVerifier } from '../services/firebase';
 import { OTPInput } from '../components/OTPInput';
+<<<<<<< HEAD
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getOrCreateUserByPhone } from '../services/userService';
+=======
+import { useTranslation } from '../hooks/useTranslation';
+>>>>>>> origin/main
 
 export function OTPVerificationScreen() {
     const { state, setState } = useAppContext();
+    const { t } = useTranslation();
     const [otp, setOtp] = useState(['', '', '', '', '', '']);
     const [loading, setLoading] = useState(false);
     const [otpError, setOtpError] = useState(false);
@@ -39,10 +44,10 @@ export function OTPVerificationScreen() {
             }
             setOtp(['', '', '', '', '', '']);
             setOtpError(false);
-            toast.success('New OTP sent successfully');
+            toast.success(t('otpResendSuccess'));
         } catch (error) {
             console.error('Resend OTP Error:', error);
-            toast.error(error.message || 'Failed to resend OTP.');
+            toast.error(error.message || t('otpResendFailed'));
         } finally {
             setLoading(false);
         }
@@ -52,7 +57,7 @@ export function OTPVerificationScreen() {
         const otpValue = otp.join('');
         if (otpValue.length !== 6) {
             setOtpError(true);
-            toast.error('Please enter a valid 6-digit OTP');
+            toast.error(t('otpInvalidInput'));
             return;
         }
 
@@ -100,12 +105,12 @@ export function OTPVerificationScreen() {
                 currentView: 'patient-dashboard'
             }));
 
-            toast.success('OTP Verified Successfully');
+            toast.success(t('otpVerified'));
 
         } catch (error) {
             console.error('Verify OTP Error:', error);
             setOtpError(true);
-            toast.error(error.message || 'Invalid OTP. Please try again.');
+            toast.error(error.message || t('otpInvalid'));
         } finally {
             setLoading(false);
         }
@@ -126,34 +131,34 @@ export function OTPVerificationScreen() {
                         <CardHeader>
                             <View style={styles.rowCentered}>
                                 <ShieldCheck size={24} color="#2563eb" style={{ marginRight: 8 }} />
-                                <CardTitle>Verify OTP</CardTitle>
+                                <CardTitle>{t('otpTitle')}</CardTitle>
                             </View>
                         </CardHeader>
                         <CardContent>
-                            <Text style={styles.otpSubtitle}>Enter the OTP sent to {phone}</Text>
+                            <Text style={styles.otpSubtitle}>{t('otpSubtitle').replace('{phone}', phone)}</Text>
 
-                            <OTPInput 
-                                length={6} 
-                                value={otp} 
-                                onChange={setOtp} 
-                                editable={!loading} 
+                            <OTPInput
+                                length={6}
+                                value={otp}
+                                onChange={setOtp}
+                                editable={!loading}
                             />
 
-                            {otpError ? <Text style={[styles.errorText, { textAlign: 'center', marginTop: 8 }]}>Invalid OTP. Please try again.</Text> : null}
+                            {otpError ? <Text style={[styles.errorText, { textAlign: 'center', marginTop: 8 }]}>{t('otpInvalid')}</Text> : null}
 
-                            <Button 
-                                onPress={handleVerifyOtp} 
-                                disabled={loading || otp.join('').length < 6} 
+                            <Button
+                                onPress={handleVerifyOtp}
+                                disabled={loading || otp.join('').length < 6}
                                 style={{ marginTop: 24, paddingVertical: 14 }}>
                                 <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>
-                                    {loading ? 'Verifying...' : 'Verify OTP'}
+                                    {loading ? t('otpVerifying') : t('otpVerifyBtn')}
                                 </Text>
                             </Button>
 
                             <View style={styles.resendContainer}>
-                                <Text style={styles.resendText}>Didn't receive the code? </Text>
+                                <Text style={styles.resendText}>{t('otpDidntReceive')} </Text>
                                 <TouchableOpacity onPress={handleResendOtp} disabled={loading}>
-                                    <Text style={styles.resendBtn}>Resend OTP</Text>
+                                    <Text style={styles.resendBtn}>{t('otpResend')}</Text>
                                 </TouchableOpacity>
                             </View>
                         </CardContent>

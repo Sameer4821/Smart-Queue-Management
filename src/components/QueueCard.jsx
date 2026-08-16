@@ -2,8 +2,11 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Card } from './ui/card';
 import { Clock } from 'lucide-react-native';
+import { useTranslation } from '../hooks/useTranslation';
 
 export function QueueCard({ token, getDepartmentIcon, formatTokenId, isActive }) {
+    const { t } = useTranslation();
+
     return (
         <Card style={[styles.queueCard, isActive && styles.activeCard]}>
             <View style={styles.qRow}>
@@ -11,9 +14,9 @@ export function QueueCard({ token, getDepartmentIcon, formatTokenId, isActive })
                     <Text style={styles.qTokenText}>{formatTokenId(token.id)}</Text>
                 </View>
                 <View style={styles.qInfo}>
-                    <Text style={styles.qName}>{token.patient?.name || 'Patient'}</Text>
+                    <Text style={styles.qName}>{token.patient?.name || t('emgPatient') || 'Patient'}</Text>
                     <Text style={styles.qTime}>
-                        <Clock size={12} color="#64748b" style={{ marginRight: 4 }} /> 
+                        <Clock size={12} color="#64748b" style={{ marginRight: 4 }} />
                         {new Date(token.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </Text>
                 </View>

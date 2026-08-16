@@ -343,7 +343,8 @@ var initialState = exports.initialState = {
     maxEmergencyPerDay: 50,
     notifications: [],
     theme: "medical",
-    consultationData: undefined
+    consultationData: undefined,
+    emergencyAlerts: []
 };
 
 var AppContext = exports.AppContext =/*#__PURE__*/(0, _react.createContext)(

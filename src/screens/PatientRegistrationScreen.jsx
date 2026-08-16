@@ -6,12 +6,18 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Phone, ArrowLeft, User } from 'lucide-react-native';
 import { toast } from 'sonner-native';
 import { useAppContext } from '../context/AppContext';
+<<<<<<< HEAD
 import { auth, signInWithPhoneNumber, RecaptchaVerifier } from '../services/firebase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getOrCreateUserByPhone } from '../services/userService';
+=======
+import { supabase } from '../services/supabaseClient';
+import { useTranslation } from '../hooks/useTranslation';
+>>>>>>> origin/main
 
 export function PatientRegistrationScreen() {
     const { setState } = useAppContext();
+    const { t } = useTranslation();
     const [phone, setPhone] = useState('');
     const [loading, setLoading] = useState(false);
     const [phoneError, setPhoneError] = useState('');
@@ -27,10 +33,10 @@ export function PatientRegistrationScreen() {
 
     const handleSubmit = async () => {
         if (!phone.trim()) {
-            setPhoneError('Mobile number is required');
+            setPhoneError(t('regMobileRequired'));
             return;
         } else if (!validatePhone(phone)) {
-            setPhoneError('Invalid mobile number');
+            setPhoneError(t('regInvalidMobile'));
             return;
         }
 
@@ -62,7 +68,7 @@ export function PatientRegistrationScreen() {
                 }
             }
 
-            toast.success('OTP sent to your mobile number');
+            toast.success(t('regOtpSent'));
             setState(prev => ({
                 ...prev,
                 pendingRegistrationPhone: formattedPhone,
@@ -70,6 +76,7 @@ export function PatientRegistrationScreen() {
                 currentView: 'otp-verification'
             }));
         } catch (error) {
+<<<<<<< HEAD
             console.error('Firebase OTP Send Error:', error);
             // Fallback for local testing / demo without strict Firebase SMS setup
             toast.info('Moving to OTP verification screen');
@@ -78,6 +85,10 @@ export function PatientRegistrationScreen() {
                 pendingRegistrationPhone: formattedPhone,
                 currentView: 'otp-verification'
             }));
+=======
+            console.error('OTP Send Error:', error);
+            toast.error(error.message || t('regOtpFailed'));
+>>>>>>> origin/main
         } finally {
             setLoading(false);
         }
@@ -93,8 +104,8 @@ export function PatientRegistrationScreen() {
                             <ArrowLeft size={20} color="#374151" />
                         </TouchableOpacity>
                         <View style={{ flex: 1 }}>
-                            <Text style={styles.title}>Patient Registration</Text>
-                            <Text style={styles.subtitle}>Enter your details to proceed</Text>
+                            <Text style={styles.title}>{t('regTitle')}</Text>
+                            <Text style={styles.subtitle}>{t('regSubtitle')}</Text>
                         </View>
                     </View>
 
@@ -102,18 +113,18 @@ export function PatientRegistrationScreen() {
                         <CardHeader>
                             <View style={styles.rowCentered}>
                                 <User size={20} color="#111827" style={{ marginRight: 8 }} />
-                                <CardTitle>Personal Info</CardTitle>
+                                <CardTitle>{t('regPersonalInfo')}</CardTitle>
                             </View>
                         </CardHeader>
                         <CardContent>
                             <View style={styles.inputGroup}>
                                 <View style={styles.labelRow}>
                                     <Phone size={16} color="#374151" style={{ marginRight: 4 }} />
-                                    <Text style={styles.label}>Mobile Number *</Text>
+                                    <Text style={styles.label}>{t('regMobileNumber')}</Text>
                                 </View>
                                 <TextInput
                                     style={[styles.input, phoneError && styles.inputError]}
-                                    placeholder="Enter 10 digit mobile number"
+                                    placeholder={t('regEnterMobile')}
                                     value={phone}
                                     onChangeText={(val) => {
                                         setPhone(val);
@@ -126,15 +137,16 @@ export function PatientRegistrationScreen() {
                                 {phoneError ? <Text style={styles.errorText}>{phoneError}</Text> : null}
                             </View>
 
-                            <Button 
-                                onPress={handleSubmit} 
-                                disabled={loading || !phone.trim()} 
+                            <Button
+                                onPress={handleSubmit}
+                                disabled={loading || !phone.trim()}
                                 style={{ marginTop: 16 }}>
                                 <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>
-                                    {loading ? 'Sending OTP...' : 'Continue'}
+                                    {loading ? t('regSendingOtp') : t('regContinue')}
                                 </Text>
                             </Button>
 
+<<<<<<< HEAD
                             <Button 
                                 onPress={async () => {
                                     const testPhone = '+919999999999';
@@ -148,6 +160,10 @@ export function PatientRegistrationScreen() {
                                     try {
                                         await AsyncStorage.setItem('current-patient-info', JSON.stringify(patientInfo));
                                     } catch (e) {}
+=======
+                            <Button
+                                onPress={() => {
+>>>>>>> origin/main
                                     setState(prev => ({
                                         ...prev,
                                         patientInfo: patientInfo,
@@ -156,7 +172,7 @@ export function PatientRegistrationScreen() {
                                 }}
                                 style={{ marginTop: 16, backgroundColor: '#10b981' }}>
                                 <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>
-                                    Skip Login (Dev)
+                                    {t('regSkipLogin')}
                                 </Text>
                             </Button>
                         </CardContent>

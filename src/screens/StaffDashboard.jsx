@@ -12,12 +12,18 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAppContext } from "../context/AppContext";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { translations } from "../translations/translations";
+import { useTranslation } from "../hooks/useTranslation";
+
 import {
   HeartPulse,
   Activity,
   Stethoscope,
   AlertCircle,
+  AlertTriangle,
+  Bell,
+  Clock,
+  Phone,
+  Truck,
   FilePlus2,
   FileText,
   CheckCircle2,
@@ -28,13 +34,9 @@ import {
   Upload,
   QrCode,
   Save,
-  Plus,
-  Monitor,
-  Download,
-  Calendar,
+  Plus
 } from "lucide-react-native";
 import { Card } from "../components/ui/card";
-import * as XLSX from "xlsx";
 import { toast } from "sonner-native";
 import { db, collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy } from "../services/firebase";
 
@@ -55,7 +57,19 @@ const QUICK_DOSAGE = ["1-0-1", "1-1-1", "0-0-1", "SOS"];
 
 export function StaffDashboard() {
   const { state: appState, setState: setAppState, addPrescriptionToToken } = useAppContext();
-  const t = translations[appState.language] || translations.en;
+
+  // ─── EMERGENCY ALERTS ───
+  const severityOrder = { critical: 0, urgent: 1, moderate: 2 };
+  const emergencyAlerts = (appState.emergencyAlerts || [])
+    .filter(a => a.alert_status !== 'resolved')
+    .sort((a, b) => {
+      const sA = severityOrder[a.severity] !== undefined ? severityOrder[a.severity] : 3;
+      const sB = severityOrder[b.severity] !== undefined ? severityOrder[b.severity] : 3;
+      if (sA !== sB) return sA - sB;
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+  const { t } = useTranslation();
+
 
   // Camera permissions
   const [permission, requestPermission] = useCameraPermissions();
@@ -86,22 +100,6 @@ export function StaffDashboard() {
   const upcomingQueue = allActiveTokens.filter(t => t.id !== activePatient?.id);
   const totalWaiting = allActiveTokens.length;
 
-  // Top-level tab: 'queue' (existing) | 'live' (new Live Queue Display) | 'records'
-  const [activeTab, setActiveTab] = useState('queue');
-
-  // Last-updated timestamp for Live Queue Display
-  const [lastUpdated, setLastUpdated] = useState(new Date());
-
-  // Patient Records states
-  const [dbRecords, setDbRecords] = useState([]);
-  const [loadingRecords, setLoadingRecords] = useState(false);
-  const [recordsDateFilter, setRecordsDateFilter] = useState('today'); // 'today' | 'yesterday' | 'week' | 'custom'
-  const [recordsCustomDate, setRecordsCustomDate] = useState(new Date().toISOString().split('T')[0]); // YYYY-MM-DD
-  const [recordsSearchQuery, setRecordsSearchQuery] = useState("");
-  const [recordsSelectedDept, setRecordsSelectedDept] = useState("all");
-  const [recordsSelectedDoctor, setRecordsSelectedDoctor] = useState("all");
-  const [recordsPaginationPage, setRecordsPaginationPage] = useState(1);
-
   // Track prescription mode
   const [prescriptionMode, setPrescriptionMode] = useState(null); // 'template', 'upload', 'scan'
 
@@ -123,6 +121,7 @@ export function StaffDashboard() {
     }
   }, [allActiveTokens]);
 
+<<<<<<< HEAD
   // Tick the "last updated" clock for Live Queue Display
   useEffect(() => {
     const tick = setInterval(() => setLastUpdated(new Date()), 30000);
@@ -147,9 +146,149 @@ export function StaffDashboard() {
     setLoadingRecords(false);
   };
 
+=======
+  // Supabase Real-Time Sync for Token Queue
+  useEffect(() => {
+    const channel = supabase.channel('public:queue_sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newRow = payload.new;
+          const mappedToken = {
+            id: newRow.token_id,
+            type: newRow.token_id && newRow.token_id.startsWith('EME') ? 'emergency' : newRow.token_id && newRow.token_id.startsWith('ACE') ? 'disabled' : 'common',
+            primaryDepartment: newRow.department,
+            timestamp: newRow.created_at ? new Date(newRow.created_at) : new Date(),
+            patient: {
+              name: newRow.patient_name || 'Walk-in Patient',
+            },
+            status: newRow.status || 'active',
+            qrCode: newRow.token_id
+          };
+
+          setAppState(prev => {
+            const exists = prev.tokens.find(t => t.id === mappedToken.id);
+            if (exists) return prev;
+            return { ...prev, tokens: [...prev.tokens, mappedToken] };
+          });
+        }
+        else if (payload.eventType === 'UPDATE') {
+          setAppState(prev => ({
+            ...prev,
+            tokens: prev.tokens.map(t => t.id === payload.new.token_id ? { ...t, status: payload.new.status } : t)
+          }));
+        }
+        else if (payload.eventType === 'DELETE') {
+          setAppState(prev => ({
+            ...prev,
+            tokens: prev.tokens.filter(t => t.id !== payload.old.token_id)
+          }));
+        }
+      })
+      .subscribe();
+
+    // Also subscribe to emergency_alerts for realtime updates
+    const emergencyChannel = supabase.channel('staff:emergency_alerts')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'emergency_alerts' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setAppState(prev => {
+            const existing = prev.emergencyAlerts || [];
+            const exists = existing.find(a => a.alert_id === payload.new.alert_id);
+            if (exists) return prev;
+            toast.error(`🚨 New Emergency Alert`, {
+              description: `${payload.new.severity.toUpperCase()}: ${payload.new.emergency_type} - ${payload.new.patient_name}`,
+              duration: 10000,
+            });
+            return { ...prev, emergencyAlerts: [...existing, payload.new] };
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          setAppState(prev => ({
+            ...prev,
+            emergencyAlerts: (prev.emergencyAlerts || []).map(a =>
+              a.alert_id === payload.new.alert_id ? { ...a, ...payload.new } : a
+            )
+          }));
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+      supabase.removeChannel(emergencyChannel);
+    };
+  }, []);
+
+>>>>>>> origin/main
   const handleBack = () => {
     setAppState((prev) => ({ ...prev, currentView: "portal" }));
   };
+
+  // ─── EMERGENCY ALERT ACTIONS ───
+  const handleAcknowledgeAlert = async (alertId) => {
+    try {
+      const staffName = appState.staffInfo?.name || 'Staff';
+      await supabase
+        .from('emergency_alerts')
+        .update({ alert_status: 'acknowledged', acknowledged_by: staffName, acknowledged_at: new Date().toISOString() })
+        .eq('alert_id', alertId);
+
+      setAppState(prev => ({
+        ...prev,
+        emergencyAlerts: (prev.emergencyAlerts || []).map(a =>
+          a.alert_id === alertId ? { ...a, alert_status: 'acknowledged', acknowledged_by: staffName, acknowledged_at: new Date().toISOString() } : a
+        )
+      }));
+      toast.success('Alert Acknowledged');
+    } catch (err) {
+      toast.error('Failed to acknowledge alert');
+    }
+  };
+
+  const handleUpdateAlertStatus = async (alertId, newStatus) => {
+    try {
+      await supabase
+        .from('emergency_alerts')
+        .update({ alert_status: newStatus })
+        .eq('alert_id', alertId);
+
+      setAppState(prev => ({
+        ...prev,
+        emergencyAlerts: (prev.emergencyAlerts || []).map(a =>
+          a.alert_id === alertId ? { ...a, alert_status: newStatus } : a
+        )
+      }));
+      toast.success(`Alert marked as ${newStatus.replace('_', ' ')}`);
+    } catch (err) {
+      toast.error('Failed to update alert status');
+    }
+  };
+
+  const getSeverityStyle = (severity) => {
+    if (severity === 'critical') return { bg: '#fef2f2', border: '#fca5a5', text: '#dc2626', label: (t('emgCritical') || 'critical').split(' ')[0].toUpperCase() };
+    if (severity === 'urgent') return { bg: '#fff7ed', border: '#fdba74', text: '#ea580c', label: (t('emgUrgent') || 'urgent').split(' ')[0].toUpperCase() };
+    return { bg: '#fefce8', border: '#fde047', text: '#ca8a04', label: (t('emgModerate') || 'moderate').split(' ')[0].toUpperCase() };
+  };
+
+  const getAlertStatusStyle = (status) => {
+    if (status === 'new') return { bg: '#dc2626', label: 'NEW' };
+    if (status === 'acknowledged') return { bg: '#2563eb', label: (t('staffAck') || 'ACKNOWLEDGED').toUpperCase() };
+    if (status === 'in_progress') return { bg: '#ea580c', label: (t('staffInProgress') || 'IN PROGRESS').toUpperCase() };
+    return { bg: '#16a34a', label: (t('staffResolve') || 'RESOLVED').toUpperCase() };
+  };
+
+
+  const formatAlertTime = (dateStr) => {
+    if (!dateStr) return '--';
+    const d = new Date(dateStr);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const getArrivalLabel = (method) => {
+    if (method === 'ambulance') return '🚑 ' + t('emgAmbulance');
+    if (method === 'own_transport') return '🚗 ' + t('emgOwnTransport');
+    if (method === 'already_here') return '🏥 ' + t('emgAlreadyHere');
+    return '--';
+  };
+
 
   const toggleLanguage = () => {
     setAppState((prev) => ({
@@ -239,9 +378,6 @@ export function StaffDashboard() {
 
       setPrescriptionMode(null);
 
-      // Refresh patient records list
-      fetchRecords().catch(console.error);
-
       // Find next patient
       const remainingTokens = allActiveTokens.filter(t => t.id !== activePatient.id);
       setActivePatient(remainingTokens.length > 0 ? remainingTokens[0] : null);
@@ -318,9 +454,6 @@ export function StaffDashboard() {
       setPrescriptionMode(null);
       setScannerOpen(false);
 
-      // Refresh patient records list
-      fetchRecords().catch(console.error);
-
       toast.success("✅ Appointment Completed", {
         description: `${matchedToken.patient?.name || "Patient"}'s appointment has been marked complete.`,
       });
@@ -344,48 +477,6 @@ export function StaffDashboard() {
     return { bg: "#f0f9ff", text: "#0ea5e9", border: "#bae6fd", name: "General" };
   };
 
-  // ─── Live Queue Display helpers ───────────────────────────────────────────
-
-  // Returns a colour accent for a department type
-  const getDeptAccent = (type) => {
-    if (type === "diagnostic") return "#f59e0b";
-    if (type === "pharmacy") return "#8b5cf6";
-    if (type === "administrative") return "#64748b";
-    return "#2563eb"; // consultation / default
-  };
-
-  // Build a map: deptName -> { tokens[], dept }
-  const buildLiveQueueMap = () => {
-    const map = {};
-
-    // Seed from department list
-    (appState.departments || []).forEach((dept) => {
-      map[dept.name] = { dept, tokens: [] };
-    });
-
-    // Populate with live tokens
-    allActiveTokens.forEach((tok) => {
-      const key = tok.primaryDepartment;
-      if (!key) return;
-      if (!map[key]) map[key] = { dept: null, tokens: [] };
-      map[key].tokens.push(tok);
-    });
-
-    // Keep only departments that have active tokens OR a non-zero queue
-    return Object.entries(map).filter(([, val]) => {
-      const hasLiveTokens = val.tokens.length > 0;
-      const hasStaticQueue = val.dept && val.dept.currentQueue > 0;
-      return hasLiveTokens || hasStaticQueue;
-    });
-  };
-
-  const formatTime = (date) => {
-    const h = date.getHours().toString().padStart(2, "0");
-    const m = date.getMinutes().toString().padStart(2, "0");
-    return `${h}:${m}`;
-  };
-  // ─────────────────────────────────────────────────────────────────────────
-
   return (
     <SafeAreaView style={styles.container}>
       {/* 1. HEADER */}
@@ -395,7 +486,7 @@ export function StaffDashboard() {
             <ArrowLeft size={24} color="#1e293b" />
           </TouchableOpacity>
           <View style={styles.headerInfo}>
-            <Text style={styles.dashboardTitle}>{t.staffDashboardTitle || "Staff Dashboard"}</Text>
+            <Text style={styles.dashboardTitle}>{t('staffDashboardTitle') || "Staff Dashboard"}</Text>
             <Text style={styles.doctorName}>
               {appState.staffInfo?.name || "Dr. Assigned"} • {appState.staffInfo?.department || "General"}
             </Text>
@@ -409,933 +500,452 @@ export function StaffDashboard() {
         </View>
         <View style={styles.statsBar}>
           <Text style={styles.waitCountText}>
-            Patients Waiting: <Text style={{ fontWeight: "700" }}>{totalWaiting}</Text>
+            {t('staffWaiting')}: <Text style={{ fontWeight: "700" }}>{totalWaiting}</Text>
           </Text>
-        </View>
-
-        {/* ── Tab Navigation Bar ── */}
-        <View style={styles.mainTabBar}>
-          <TouchableOpacity
-            style={[styles.mainTabBtn, activeTab === 'queue' && styles.mainTabBtnActive]}
-            onPress={() => setActiveTab('queue')}
-          >
-            <Activity size={16} color={activeTab === 'queue' ? '#2563eb' : '#64748b'} />
-            <Text style={[styles.mainTabText, activeTab === 'queue' && styles.mainTabTextActive]}>
-              Queue Management
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.mainTabBtn, activeTab === 'live' && styles.mainTabBtnActive]}
-            onPress={() => setActiveTab('live')}
-          >
-            <Monitor size={16} color={activeTab === 'live' ? '#2563eb' : '#64748b'} />
-            <Text style={[styles.mainTabText, activeTab === 'live' && styles.mainTabTextActive]}>
-              Live Queue
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.mainTabBtn, activeTab === 'records' && styles.mainTabBtnActive]}
-            onPress={() => setActiveTab('records')}
-          >
-            <FileText size={16} color={activeTab === 'records' ? '#2563eb' : '#64748b'} />
-            <Text style={[styles.mainTabText, activeTab === 'records' && styles.mainTabTextActive]}>
-              Patient Records
-            </Text>
-          </TouchableOpacity>
         </View>
       </View>
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          LIVE QUEUE DISPLAY TAB
-      ══════════════════════════════════════════════════════════════════════ */}
-      {activeTab === 'live' && (() => {
-        const liveRows = buildLiveQueueMap();
-        return (
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-            {/* Header row */}
-            <View style={styles.liveHeaderRow}>
-              <View>
-                <Text style={styles.liveTitle}>Live Queue Display</Text>
-                <Text style={styles.liveSubtitle}>{liveRows.length} department{liveRows.length !== 1 ? 's' : ''} active</Text>
-              </View>
-              <View style={styles.liveUpdatedBadge}>
-                <Text style={styles.liveUpdatedText}>Updated {formatTime(lastUpdated)}</Text>
-              </View>
+
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+
+        {/* EMERGENCY ALERTS SECTION */}
+        {emergencyAlerts.length > 0 && (
+          <View style={eaStyles.section}>
+            <View style={eaStyles.sectionHeader}>
+              <AlertTriangle size={20} color="#dc2626" />
+              <Text style={eaStyles.sectionTitle}>{t('staffEmergencyAlerts')} ({emergencyAlerts.length})</Text>
             </View>
 
-            {liveRows.length === 0 ? (
-              <View style={styles.liveEmptyState}>
-                <Monitor size={52} color="#cbd5e1" />
-                <Text style={styles.liveEmptyTitle}>No Active Queues</Text>
-                <Text style={styles.liveEmptySub}>All departments are currently idle.</Text>
-              </View>
-            ) : (
-              liveRows.map(([deptName, val]) => {
-                const { dept, tokens: dTokens } = val;
-                const accent = getDeptAccent(dept?.type);
+            {emergencyAlerts.map((alert) => {
+              const sevStyle = getSeverityStyle(alert.severity);
+              const statusStyle = getAlertStatusStyle(alert.alert_status);
+              return (
+                <View key={alert.alert_id} style={[eaStyles.alertCard, { borderColor: sevStyle.border, backgroundColor: sevStyle.bg }]}>
+                  {/* Header row: severity + status */}
+                  <View style={eaStyles.alertHeader}>
+                    <View style={[eaStyles.severityBadge, { backgroundColor: sevStyle.text }]}>
+                      <Text style={eaStyles.severityBadgeText}>{sevStyle.label}</Text>
+                    </View>
+                    <View style={[eaStyles.statusBadge, { backgroundColor: statusStyle.bg }]}>
+                      <Text style={eaStyles.statusBadgeText}>{statusStyle.label}</Text>
+                    </View>
+                  </View>
 
-                // Sort tokens by priority then timestamp
-                const sorted = [...dTokens].sort((a, b) => {
-                  const pA = priorityMap[a.type] || 3;
-                  const pB = priorityMap[b.type] || 3;
-                  if (pA !== pB) return pA - pB;
-                  return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-                });
+                  {/* Emergency + Patient info */}
+                  <Text style={[eaStyles.alertType, { color: sevStyle.text }]}>{alert.emergency_type}</Text>
+                  <Text style={eaStyles.patientName}>{alert.patient_name}{alert.patient_age ? `, ${alert.patient_age} yrs` : ''}{alert.patient_gender ? ` • ${alert.patient_gender.charAt(0).toUpperCase()}` : ''}</Text>
 
-                const nowServingToken = sorted[0];
-                const nextToken = sorted[1];
+                  {/* Condition */}
+                  {alert.condition_details ? (
+                    <Text style={eaStyles.conditionText} numberOfLines={3}>{alert.condition_details}</Text>
+                  ) : null}
 
-                // Counter label from first available doctor or static fallback
-                const availDoc = dept?.doctors?.find(d => d.status === 'available');
-                const counterLabel = availDoc
-                  ? `Counter ${dept.doctors.indexOf(availDoc) + 1}`.padEnd(2)
-                  : 'Counter 01';
-
-                const isActive = dTokens.length > 0 || (dept?.currentQueue ?? 0) > 0;
-
-                return (
-                  <View key={deptName} style={styles.liveCard}>
-                    {/* Coloured left accent bar */}
-                    <View style={[styles.liveAccentBar, { backgroundColor: accent }]} />
-
-                    <View style={styles.liveCardBody}>
-                      {/* Department name */}
-                      <Text style={styles.liveDeptName} numberOfLines={1}>{deptName}</Text>
-
-                      {/* Serving / Next row */}
-                      <View style={styles.liveInfoRow}>
-                        <View style={styles.liveInfoCell}>
-                          <Text style={styles.liveInfoLabel}>Now Serving</Text>
-                          <Text style={[styles.liveInfoValue, { color: accent }]}>
-                            {nowServingToken ? formatTokenId(nowServingToken.id) : '---'}
-                          </Text>
-                        </View>
-
-                        <View style={styles.liveDivider} />
-
-                        <View style={styles.liveInfoCell}>
-                          <Text style={styles.liveInfoLabel}>Next</Text>
-                          <Text style={styles.liveInfoValue}>
-                            {nextToken ? formatTokenId(nextToken.id) : '---'}
-                          </Text>
-                        </View>
-
-                        <View style={styles.liveDivider} />
-
-                        <View style={styles.liveInfoCell}>
-                          <Text style={styles.liveInfoLabel}>Counter</Text>
-                          <Text style={styles.liveInfoValue}>{counterLabel}</Text>
-                        </View>
-
-                        <View style={styles.liveDivider} />
-
-                        {/* Status badge */}
-                        <View style={[styles.liveStatusBadge, isActive ? styles.liveStatusActive : styles.liveStatusPaused]}>
-                          <Text style={styles.liveStatusDot}>{isActive ? '🟢' : '🟡'}</Text>
-                          <Text style={[styles.liveStatusText, { color: isActive ? '#16a34a' : '#d97706' }]}>
-                            {isActive ? 'Active' : 'Paused'}
-                          </Text>
-                        </View>
+                  {/* Details row */}
+                  <View style={eaStyles.detailsRow}>
+                    {alert.arrival_method ? (
+                      <View style={eaStyles.detailChip}>
+                        <Truck size={12} color="#475569" />
+                        <Text style={eaStyles.detailChipText}>{getArrivalLabel(alert.arrival_method)}</Text>
                       </View>
-
-                      {/* Queue count footer */}
-                      <Text style={styles.liveQueueCount}>
-                        {dTokens.length > 0
-                          ? `${dTokens.length} patient${dTokens.length !== 1 ? 's' : ''} in queue`
-                          : `${dept?.currentQueue ?? 0} in queue`}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })
-            )}
-          </ScrollView>
-        );
-      })()}
-
-      {/* ══════════════════════════════════════════════════════════════════════
-          PATIENT RECORDS TAB
-      ══════════════════════════════════════════════════════════════════════ */}
-      {activeTab === 'records' && (() => {
-        // Date match checker
-        const matchesDateFilter = (createdAtStr) => {
-          const itemDate = new Date(createdAtStr);
-          const now = new Date();
-
-          if (recordsDateFilter === 'today') {
-            return itemDate.toDateString() === now.toDateString();
-          }
-          if (recordsDateFilter === 'yesterday') {
-            const yesterday = new Date();
-            yesterday.setDate(now.getDate() - 1);
-            return itemDate.toDateString() === yesterday.toDateString();
-          }
-          if (recordsDateFilter === 'week') {
-            const diffTime = Math.abs(now - itemDate);
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            return diffDays <= 7;
-          }
-          if (recordsDateFilter === 'custom') {
-            if (!recordsCustomDate) return true;
-            const [cYear, cMonth, cDay] = recordsCustomDate.split('-').map(Number);
-            const itemYear = itemDate.getFullYear();
-            const itemMonth = itemDate.getMonth() + 1;
-            const itemDay = itemDate.getDate();
-            return itemYear === cYear && itemMonth === cMonth && itemDay === cDay;
-          }
-          return true;
-        };
-
-        // Build combined list of rows (use dbRecords as base, and add/override with local tokens)
-        const mergedRecords = [];
-        dbRecords.forEach(row => {
-          mergedRecords.push({ ...row });
-        });
-
-        (appState.tokens || []).forEach(localToken => {
-          const existingIdx = mergedRecords.findIndex(r => r.token_id === localToken.id);
-          if (existingIdx === -1) {
-            mergedRecords.push({
-              token_id: localToken.id,
-              patient_name: localToken.patient?.name || "Unknown Patient",
-              department: localToken.primaryDepartment,
-              doctor_id: localToken.assignedDoctor || null,
-              status: localToken.status || 'waiting',
-              created_at: localToken.timestamp || new Date()
-            });
-          } else {
-            if (localToken.status) {
-              mergedRecords[existingIdx].status = localToken.status === 'completed' ? 'completed' : localToken.status;
-            }
-          }
-        });
-
-        // Filter records
-        const filteredRows = mergedRecords.filter(row => {
-          if (!matchesDateFilter(row.created_at)) return false;
-          if (recordsSelectedDept !== 'all' && row.department !== recordsSelectedDept) return false;
-          if (recordsSelectedDoctor !== 'all' && row.doctor_id !== recordsSelectedDoctor) return false;
-          if (recordsSearchQuery.trim() !== '') {
-            const query = recordsSearchQuery.toLowerCase();
-            const nameMatch = row.patient_name?.toLowerCase().includes(query);
-            const idMatch = row.token_id?.toLowerCase().includes(query);
-            if (!nameMatch && !idMatch) return false;
-          }
-          return true;
-        }).map(row => {
-          const richToken = appState.tokens.find(t => t.id === row.token_id);
-          const patient = richToken?.patient || {};
-          const seed = row.token_id.charCodeAt(5) || 12;
-          const age = patient.age || (seed % 50 + 20);
-          const gender = patient.gender || (seed % 2 === 0 ? 'male' : 'female');
-          const phone = patient.phone || `+91 98${seed % 10}45 28${(seed * 7) % 10}`;
-
-          const createdDate = new Date(row.created_at);
-          const visitDate = createdDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-          const visitTime = createdDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-
-          return {
-            patientId: patient.patientId || `PAT-${visitDate.replace(/ /g, '')}-${formatTokenId(row.token_id)}`,
-            patientName: row.patient_name || "Unknown Patient",
-            age: age,
-            gender: gender.charAt(0).toUpperCase() + gender.slice(1),
-            phone: phone,
-            department: row.department || "General Consultation",
-            doctor: getDoctorName(row.doctor_id, row.department),
-            tokenNumber: formatTokenId(row.token_id),
-            visitDate: visitDate,
-            visitTime: visitTime,
-            queueStatus: row.status === 'completed' ? 'Served' : 'Waiting',
-            consultationStatus: row.status === 'completed' ? 'Completed' : 'Waiting',
-            rawCreatedAt: createdDate
-          };
-        });
-
-        // Pagination
-        const itemsPerPage = 10;
-        const totalPages = Math.max(1, Math.ceil(filteredRows.length / itemsPerPage));
-        const paginatedRows = filteredRows.slice((recordsPaginationPage - 1) * itemsPerPage, recordsPaginationPage * itemsPerPage);
-
-        // Date selection title
-        const getSelectedDateTitle = () => {
-          let dateStr = "";
-          if (recordsDateFilter === 'today') {
-            dateStr = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
-          } else if (recordsDateFilter === 'yesterday') {
-            const yesterday = new Date();
-            yesterday.setDate(yesterday.getDate() - 1);
-            dateStr = yesterday.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
-          } else if (recordsDateFilter === 'custom' && recordsCustomDate) {
-            const [y, m, d] = recordsCustomDate.split('-').map(Number);
-            const customDateObj = new Date(y, m - 1, d);
-            dateStr = customDateObj.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
-          } else {
-            dateStr = "Selected Period";
-          }
-          return `Patient Records — ${dateStr}`;
-        };
-
-        const handleDownloadExcel = () => {
-          if (filteredRows.length === 0) {
-            toast.error("No Records", { description: "There are no records to download." });
-            return;
-          }
-
-          const worksheetData = filteredRows.map(item => ({
-            "Patient ID": item.patientId,
-            "Patient Name": item.patientName,
-            "Age": item.age,
-            "Gender": item.gender,
-            "Phone Number": item.phone,
-            "Department": item.department,
-            "Doctor": item.doctor,
-            "Token Number": item.tokenNumber,
-            "Visit Date": item.visitDate,
-            "Visit Time": item.visitTime,
-            "Queue Status": item.queueStatus,
-            "Consultation Status": item.consultationStatus
-          }));
-
-          const worksheet = XLSX.utils.json_to_sheet(worksheetData);
-          const workbook = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(workbook, worksheet, "Patient Records");
-
-          let dateSuffix = "";
-          if (recordsDateFilter === 'today') {
-            dateSuffix = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
-          } else if (recordsDateFilter === 'yesterday') {
-            const yesterday = new Date();
-            yesterday.setDate(yesterday.getDate() - 1);
-            dateSuffix = yesterday.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
-          } else if (recordsDateFilter === 'custom' && recordsCustomDate) {
-            const [y, m, d] = recordsCustomDate.split('-').map(Number);
-            const customDateObj = new Date(y, m - 1, d);
-            dateSuffix = customDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
-          } else {
-            dateSuffix = "Period";
-          }
-
-          try {
-            XLSX.writeFile(workbook, `Patient_Records_${dateSuffix}.xlsx`);
-            toast.success("Excel Downloaded", { description: `Successfully exported ${filteredRows.length} patient records.` });
-          } catch (err) {
-            console.error("Error creating excel:", err);
-            toast.error("Download Failed", { description: "Could not generate Excel spreadsheet." });
-          }
-        };
-
-        const getDoctorDropdown = () => {
-          let docs = [];
-          if (recordsSelectedDept === 'all') {
-            appState.departments?.forEach(d => {
-              d.doctors?.forEach(doc => {
-                if (!docs.find(existing => existing.id === doc.id)) {
-                  docs.push({ id: doc.id, name: doc.name });
-                }
-              });
-            });
-          } else {
-            const dept = appState.departments?.find(d => d.name === recordsSelectedDept);
-            dept?.doctors?.forEach(doc => {
-              docs.push({ id: doc.id, name: doc.name });
-            });
-          }
-          return docs;
-        };
-
-        const availableDocs = getDoctorDropdown();
-        const dateQuickOptions = [
-          { key: 'today', label: 'Today' },
-          { key: 'yesterday', label: 'Yesterday' },
-          { key: 'week', label: 'This Week' },
-          { key: 'custom', label: 'Custom Date' }
-        ];
-
-        return (
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-            {/* Header row */}
-            <View style={styles.liveHeaderRow}>
-              <View>
-                <Text style={styles.liveTitle}>{getSelectedDateTitle()}</Text>
-                <Text style={styles.liveSubtitle}>Total Patients Visited: {filteredRows.length}</Text>
-              </View>
-              <TouchableOpacity style={styles.downloadExcelBtn} onPress={handleDownloadExcel}>
-                <Download size={16} color="#ffffff" style={{ marginRight: 6 }} />
-                <Text style={styles.downloadExcelText}>Download Excel</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Filter Panel */}
-            <View style={styles.filterCard}>
-              <Text style={styles.filterTitle}>Search & Filters</Text>
-
-              {/* Search search query */}
-              <View style={styles.filterRow}>
-                <View style={[styles.filterCell, { flex: 2 }]}>
-                  <Text style={styles.filterLabel}>Search Patient Name or ID</Text>
-                  <TextInput
-                    style={styles.filterSearchInput}
-                    placeholder="E.g. Rahul Kumar or PAT-..."
-                    value={recordsSearchQuery}
-                    onChangeText={(val) => {
-                      setRecordsSearchQuery(val);
-                      setRecordsPaginationPage(1);
-                    }}
-                  />
-                </View>
-              </View>
-
-              {/* Department & Doctor Selects */}
-              <View style={[styles.filterRow, { marginTop: 12 }]}>
-                <View style={styles.filterCell}>
-                  <Text style={styles.filterLabel}>Department</Text>
-                  {Platform.OS === 'web' ? (
-                    <select
-                      value={recordsSelectedDept}
-                      onChange={(e) => {
-                        setRecordsSelectedDept(e.target.value);
-                        setRecordsSelectedDoctor('all');
-                        setRecordsPaginationPage(1);
-                      }}
-                      style={styles.webSelect}
-                    >
-                      <option value="all">All Departments</option>
-                      {appState.departments?.map(d => (
-                        <option key={d.name} value={d.name}>{d.name}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <TextInput
-                      style={styles.filterSearchInput}
-                      placeholder="All Departments"
-                      value={recordsSelectedDept}
-                      onChangeText={(val) => {
-                        setRecordsSelectedDept(val);
-                        setRecordsPaginationPage(1);
-                      }}
-                    />
-                  )}
-                </View>
-
-                <View style={styles.filterCell}>
-                  <Text style={styles.filterLabel}>Doctor</Text>
-                  {Platform.OS === 'web' ? (
-                    <select
-                      value={recordsSelectedDoctor}
-                      onChange={(e) => {
-                        setRecordsSelectedDoctor(e.target.value);
-                        setRecordsPaginationPage(1);
-                      }}
-                      style={styles.webSelect}
-                    >
-                      <option value="all">All Doctors</option>
-                      {availableDocs.map(doc => (
-                        <option key={doc.id} value={doc.id}>{doc.name}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <TextInput
-                      style={styles.filterSearchInput}
-                      placeholder="All Doctors"
-                      value={recordsSelectedDoctor}
-                      onChangeText={(val) => {
-                        setRecordsSelectedDoctor(val);
-                        setRecordsPaginationPage(1);
-                      }}
-                    />
-                  )}
-                </View>
-              </View>
-
-              {/* Date Quick Options */}
-              <View style={[styles.filterRow, { marginTop: 16 }]}>
-                <View style={styles.filterCell}>
-                  <Text style={styles.filterLabel}>Date Quick Filter</Text>
-                  <View style={styles.quickDateRow}>
-                    {dateQuickOptions.map(opt => {
-                      const isActive = recordsDateFilter === opt.key;
-                      return (
-                        <TouchableOpacity
-                          key={opt.key}
-                          style={[styles.quickDateBtn, isActive && styles.quickDateBtnActive]}
-                          onPress={() => {
-                            setRecordsDateFilter(opt.key);
-                            setRecordsPaginationPage(1);
-                          }}
-                        >
-                          <Text style={[styles.quickDateText, isActive && styles.quickDateTextActive]}>
-                            {opt.label}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-
-                  {recordsDateFilter === 'custom' && (
-                    <View style={styles.customDateContainer}>
-                      <Text style={[styles.filterLabel, { marginTop: 8 }]}>Custom Date Selection</Text>
-                      {Platform.OS === 'web' ? (
-                        <input
-                          style={styles.webDateInput}
-                          type="date"
-                          value={recordsCustomDate}
-                          onChange={(e) => {
-                            setRecordsCustomDate(e.target.value);
-                            setRecordsPaginationPage(1);
-                          }}
-                        />
-                      ) : (
-                        <TextInput
-                          style={styles.filterSearchInput}
-                          placeholder="YYYY-MM-DD"
-                          value={recordsCustomDate}
-                          onChangeText={(val) => {
-                            setRecordsCustomDate(val);
-                            setRecordsPaginationPage(1);
-                          }}
-                        />
-                      )}
-                    </View>
-                  )}
-                </View>
-              </View>
-            </View>
-
-            {/* Table Container */}
-            <View style={styles.tableCard}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-                <View style={styles.tableContainer}>
-                  {/* Table Header */}
-                  <View style={[styles.tableRow, styles.tableHeaderRowStyle]}>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 140 }]}>Patient ID</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 150 }]}>Patient Name</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 50 }]}>Age</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 80 }]}>Gender</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 130 }]}>Phone Number</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 140 }]}>Department</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 140 }]}>Doctor</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 90 }]}>Token No.</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 110 }]}>Visit Date</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 95 }]}>Visit Time</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 100 }]}>Queue Status</Text>
-                    <Text style={[styles.tableHeaderCell, { minWidth: 100 }]}>Consultation</Text>
-                  </View>
-
-                  {/* Table Body */}
-                  {loadingRecords ? (
-                    <View style={styles.tableLoadingState}>
-                      <Text style={styles.tableLoadingText}>Loading records...</Text>
-                    </View>
-                  ) : paginatedRows.length === 0 ? (
-                    <View style={styles.tableEmptyState}>
-                      <FileText size={48} color="#cbd5e1" style={{ marginBottom: 12 }} />
-                      <Text style={styles.tableEmptyText}>No Patient Records Found</Text>
-                      <Text style={styles.tableEmptySub}>Try adjusting the search query or filters.</Text>
-                    </View>
-                  ) : (
-                    paginatedRows.map((row, index) => {
-                      const isEven = index % 2 === 0;
-                      return (
-                        <View key={row.patientId + '-' + index} style={[styles.tableRow, isEven ? styles.tableRowEven : styles.tableRowOdd]}>
-                          <Text style={[styles.tableBodyCell, { minWidth: 140, fontWeight: '700', color: '#1d4ed8' }]}>{row.patientId}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 150, fontWeight: '700', color: '#0f172a' }]}>{row.patientName}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 50, color: '#334155' }]}>{row.age}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 80, color: '#334155' }]}>{row.gender}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 130, color: '#475569' }]}>{row.phone}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 140, color: '#334155', fontWeight: '500' }]}>{row.department}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 140, color: '#475569', fontStyle: 'italic' }]}>{row.doctor}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 90, fontWeight: '800', color: '#2563eb' }]}>{row.tokenNumber}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 110, color: '#334155' }]}>{row.visitDate}</Text>
-                          <Text style={[styles.tableBodyCell, { minWidth: 95, color: '#334155' }]}>{row.visitTime}</Text>
-                          <View style={{ minWidth: 100, justifyContent: 'center' }}>
-                            <View style={[styles.statusBadgeSmall, row.queueStatus === 'Served' ? styles.statusBadgeServed : styles.statusBadgeWaiting]}>
-                              <Text style={[styles.statusBadgeTextSmall, { color: row.queueStatus === 'Served' ? '#16a34a' : '#d97706' }]}>
-                                {row.queueStatus}
-                              </Text>
-                            </View>
-                          </View>
-                          <View style={{ minWidth: 100, justifyContent: 'center' }}>
-                            <View style={[styles.statusBadgeSmall, row.consultationStatus === 'Completed' ? styles.statusBadgeServed : styles.statusBadgeWaiting]}>
-                              <Text style={[styles.statusBadgeTextSmall, { color: row.consultationStatus === 'Completed' ? '#16a34a' : '#d97706' }]}>
-                                {row.consultationStatus}
-                              </Text>
-                            </View>
-                          </View>
-                        </View>
-                      );
-                    })
-                  )}
-                </View>
-              </ScrollView>
-            </View>
-
-            {/* Pagination Controls */}
-            {filteredRows.length > 0 && (
-              <View style={styles.paginationRow}>
-                <TouchableOpacity
-                  style={[styles.paginationBtn, recordsPaginationPage === 1 && styles.paginationBtnDisabled]}
-                  disabled={recordsPaginationPage === 1}
-                  onPress={() => setRecordsPaginationPage(prev => Math.max(1, prev - 1))}
-                >
-                  <Text style={styles.paginationBtnText}>Previous</Text>
-                </TouchableOpacity>
-
-                <Text style={styles.paginationLabel}>
-                  Page {recordsPaginationPage} of {totalPages} (Total: {filteredRows.length})
-                </Text>
-
-                <TouchableOpacity
-                  style={[styles.paginationBtn, recordsPaginationPage === totalPages && styles.paginationBtnDisabled]}
-                  disabled={recordsPaginationPage === totalPages}
-                  onPress={() => setRecordsPaginationPage(prev => Math.min(totalPages, prev + 1))}
-                >
-                  <Text style={styles.paginationBtnText}>Next</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </ScrollView>
-        );
-      })()}
-
-      {/* ══════════════════════════════════════════════════════════════════════
-          QUEUE MANAGEMENT TAB (existing content)
-      ══════════════════════════════════════════════════════════════════════ */}
-      {activeTab === 'queue' && (
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {/* 2. ACTIVE PATIENT CARD */}
-          {activePatient ? (
-            <View style={styles.activePatientContainer}>
-              <Text style={styles.sectionTitle}>Current Patient</Text>
-              <Card style={styles.activeCard}>
-                <View style={styles.activeCardContent}>
-                  <View style={styles.mainTokenArea}>
-                    <Text style={styles.tokenLabel}>TOKEN</Text>
-                    <Text style={styles.largeToken}>{formatTokenId(activePatient.id)}</Text>
-                    <View style={[styles.priorityBadge, { backgroundColor: getPriorityColors(activePatient.type).bg }]}>
-                      <Text style={[styles.priorityText, { color: getPriorityColors(activePatient.type).text }]}>
-                        {getPriorityColors(activePatient.type).name}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.patientDetails}>
-                    <Text style={styles.patientName}>{activePatient.patient?.name || "Patient Name"}</Text>
-                    <Text style={styles.patientAge}>
-                      {activePatient.patient?.age || "--"} Yrs • {activePatient.patient?.gender?.charAt(0).toUpperCase() || "U"}
-                    </Text>
-                    <View style={styles.infoRow}>
-                      <Stethoscope size={14} color="#64748b" />
-                      <Text style={styles.infoText}>{activePatient.primaryDepartment || "General Consultation"}</Text>
-                    </View>
-                    <View style={styles.infoRow}>
-                      <Activity size={14} color="#64748b" />
-                      <Text style={styles.infoText} numberOfLines={1}>
-                        Symptoms: Standard check-up
-                      </Text>
-                    </View>
-                    <View style={styles.verifyContainer}>
-                      <Text style={styles.verifyText}>ID: {activePatient.id.substring(0, 8).toUpperCase()}</Text>
-                    </View>
-                  </View>
-                </View>
-              </Card>
-
-              {/* 3. MAIN ACTION AREA */}
-              <View style={styles.mainActionArea}>
-                <TouchableOpacity
-                  style={[styles.primaryActionBtn, prescriptionMode ? styles.activeActionBtn : null]}
-                  onPress={() => setPrescriptionMode(prescriptionMode ? null : 'template')}
-                >
-                  <FileText size={20} color={prescriptionMode ? "#fff" : "#2563eb"} />
-                  <Text style={[styles.primaryActionText, prescriptionMode && { color: "#fff" }]}>Prescription</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.completeBtn} onPress={handleMarkComplete}>
-                  <CheckCircle2 size={24} color="#fff" />
-                  <Text style={styles.completeBtnText}>Mark Complete</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* QR Scanner Section */}
-              <TouchableOpacity style={styles.scanQrBtn} onPress={openScanner}>
-                <QrCode size={20} color="#fff" />
-                <Text style={styles.scanQrBtnText}>Scan QR Code</Text>
-              </TouchableOpacity>
-
-              {/* QR Scanner Camera */}
-              {scannerOpen && (
-                <View style={styles.scannerContainer}>
-                  <View style={styles.scannerHeader}>
-                    <Text style={styles.scannerTitle}>📷 Scanning...</Text>
-                    <TouchableOpacity onPress={closeScanner} style={styles.closeScannerBtn}>
-                      <Text style={styles.closeScannerText}>✕ Close</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <View style={styles.cameraWrapper}>
-                    <CameraView
-                      style={styles.camera}
-                      facing="back"
-                      barcodeScannerSettings={{
-                        barcodeTypes: ["qr"],
-                      }}
-                      onBarcodeScanned={handleBarCodeScanned}
-                    />
-                    {/* Scan overlay frame */}
-                    <View style={styles.scanOverlay}>
-                      <View style={styles.scanFrame}>
-                        <View style={[styles.scanCorner, styles.scanCornerTL]} />
-                        <View style={[styles.scanCorner, styles.scanCornerTR]} />
-                        <View style={[styles.scanCorner, styles.scanCornerBL]} />
-                        <View style={[styles.scanCorner, styles.scanCornerBR]} />
+                    ) : null}
+                    {alert.estimated_arrival ? (
+                      <View style={eaStyles.detailChip}>
+                        <Clock size={12} color="#475569" />
+                        <Text style={eaStyles.detailChipText}>{t('staffEta') || "ETA"}: {alert.estimated_arrival}</Text>
                       </View>
-                      <Text style={styles.scanHintText}>Align QR code within the frame</Text>
-                    </View>
-                  </View>
-                </View>
-              )}
-
-              {/* Scan Result: Completed Patient */}
-              {lastScannedPatient && (
-                <View style={styles.scanResultContainer}>
-                  <View style={styles.completedCard}>
-                    <View style={styles.completedHeader}>
-                      <CheckCircle2 size={20} color="#16a34a" />
-                      <Text style={styles.completedHeaderText}>Appointment Completed</Text>
-                    </View>
-                    <View style={styles.completedBody}>
-                      <View style={styles.completedTokenCircle}>
-                        <Text style={styles.completedTokenText}>{formatTokenId(lastScannedPatient.id)}</Text>
+                    ) : null}
+                    {alert.contact_number ? (
+                      <View style={eaStyles.detailChip}>
+                        <Phone size={12} color="#475569" />
+                        <Text style={eaStyles.detailChipText}>{alert.contact_number}</Text>
                       </View>
-                      <View style={styles.completedInfo}>
-                        <Text style={styles.completedName}>{lastScannedPatient.patient?.name || "Patient"}</Text>
-                        <Text style={styles.completedDetail}>
-                          {lastScannedPatient.patient?.age || "--"} Yrs • {lastScannedPatient.primaryDepartment || "General"}
-                        </Text>
-                        <View style={styles.completedBadge}>
-                          <Text style={styles.completedBadgeText}>✓ Done</Text>
-                        </View>
-                      </View>
-                    </View>
+                    ) : null}
                   </View>
 
-                  {/* Next Patient's Turn */}
-                  {nextPatientAfterScan ? (
-                    <View style={styles.nextPatientCard}>
-                      <View style={styles.nextPatientHeader}>
-                        <Activity size={18} color="#2563eb" />
-                        <Text style={styles.nextPatientHeaderText}>Next Patient's Turn</Text>
-                      </View>
-                      <View style={styles.nextPatientBody}>
-                        <View style={[styles.nextTokenCircle, { backgroundColor: getPriorityColors(nextPatientAfterScan.type).bg }]}>
-                          <Text style={[styles.nextTokenText, { color: getPriorityColors(nextPatientAfterScan.type).text }]}>
-                            {formatTokenId(nextPatientAfterScan.id)}
-                          </Text>
-                        </View>
-                        <View style={styles.nextPatientInfo}>
-                          <Text style={styles.nextPatientName}>{nextPatientAfterScan.patient?.name || "Patient"}</Text>
-                          <Text style={styles.nextPatientDetail}>
-                            {nextPatientAfterScan.patient?.age || "--"} Yrs • {nextPatientAfterScan.primaryDepartment || "General"}
-                          </Text>
-                        </View>
-                        <View style={[styles.nextPriorityBadge, { borderColor: getPriorityColors(nextPatientAfterScan.type).border }]}>
-                          <Text style={[styles.nextPriorityText, { color: getPriorityColors(nextPatientAfterScan.type).text }]}>
-                            {getPriorityColors(nextPatientAfterScan.type).name}
-                          </Text>
-                        </View>
-                      </View>
+                  {/* Assistance needed */}
+                  {alert.assistance_needed && alert.assistance_needed.length > 0 ? (
+                    <View style={eaStyles.assistanceRow}>
+                      <Text style={eaStyles.assistanceLabel}>{t('staffAssistance') || "Assistance"}:</Text>
+                      <Text style={eaStyles.assistanceText}>{alert.assistance_needed.join(', ')}</Text>
                     </View>
-                  ) : (
-                    <View style={styles.noMorePatientsCard}>
-                      <CheckCircle2 size={24} color="#22c55e" />
-                      <Text style={styles.noMorePatientsText}>All appointments completed! 🎉</Text>
-                    </View>
-                  )}
-                </View>
-              )}
+                  ) : null}
 
-              {/* 4. PRESCRIPTION PANEL */}
-              {prescriptionMode && (
-                <View style={styles.prescriptionPanel}>
-                  {/* 3 Row-wise options */}
-                  <View style={styles.prescriptionTabs}>
-                    <TouchableOpacity
-                      style={[styles.tabBtn, prescriptionMode === 'template' && styles.activeTab]}
-                      onPress={() => setPrescriptionMode('template')}
-                    >
-                      <Text style={[styles.tabText, prescriptionMode === 'template' && styles.activeTabText]}>Template</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.tabBtn, prescriptionMode === 'upload' && styles.activeTab]}
-                      onPress={() => setPrescriptionMode('upload')}
-                    >
-                      <Text style={[styles.tabText, prescriptionMode === 'upload' && styles.activeTabText]}>Upload</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.tabBtn, prescriptionMode === 'scan' && styles.activeTab]}
-                      onPress={() => setPrescriptionMode('scan')}
-                    >
-                      <Text style={[styles.tabText, prescriptionMode === 'scan' && styles.activeTabText]}>Scan</Text>
-                    </TouchableOpacity>
+                  {/* Time + acknowledged by */}
+                  <View style={eaStyles.timeRow}>
+                    <Text style={eaStyles.timeText}>{t('staffReceived') || "Received"}: {formatAlertTime(alert.created_at)}</Text>
+                    {alert.acknowledged_by ? (
+                      <Text style={eaStyles.ackText}>{t('staffAck') || "Ack"}: {alert.acknowledged_by}</Text>
+                    ) : null}
                   </View>
 
-                  {/* 4A. USE PRESCRIPTION TEMPLATE */}
-                  {prescriptionMode === 'template' && (
-                    <View style={styles.panelContent}>
-                      <Text style={styles.subTitle}>Quick Templates</Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsContainer}>
-                        {TEMPLATES.map((tmpl, idx) => (
-                          <TouchableOpacity key={idx} style={styles.chip} onPress={() => handleApplyTemplate(tmpl)}>
-                            <Text style={styles.chipText}>{tmpl.name}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-
-                      <Text style={styles.label}>Problem / Diagnosis</Text>
-                      <TextInput
-                        style={styles.inputArea}
-                        value={diagnosis}
-                        onChangeText={setDiagnosis}
-                        placeholder="Enter diagnosis..."
-                      />
-
-                      <Text style={[styles.label, { marginTop: 12 }]}>Medicines & Dosage</Text>
-                      {medicines.map((med, index) => (
-                        <View key={index} style={styles.medicineRow}>
-                          <TextInput
-                            style={[styles.inputField, { flex: 2 }]}
-                            placeholder="Medicine Name"
-                            value={med.name}
-                            onChangeText={(v) => updateMedicine(index, 'name', v)}
-                          />
-                          <View style={styles.medCol}>
-                            <TextInput
-                              style={[styles.inputField, { marginBottom: 4 }]}
-                              placeholder="Dosage (e.g., 1-0-1)"
-                              value={med.dosage}
-                              onChangeText={(v) => updateMedicine(index, 'dosage', v)}
-                            />
-                            <View style={styles.quickDosages}>
-                              {QUICK_DOSAGE.map(q => (
-                                <TouchableOpacity key={q} style={styles.dosageChip} onPress={() => updateMedicine(index, 'dosage', q)}>
-                                  <Text style={styles.dosageChipText}>{q}</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-                          </View>
-                          <TextInput
-                            style={[styles.inputField, { flex: 0.8 }]}
-                            placeholder="Days"
-                            value={med.days}
-                            keyboardType="numeric"
-                            onChangeText={(v) => updateMedicine(index, 'days', v)}
-                          />
-                        </View>
-                      ))}
-                      <TouchableOpacity style={styles.addMedBtn} onPress={addMedicineRow}>
-                        <Plus size={16} color="#2563eb" />
-                        <Text style={styles.addMedText}>Add Medicine</Text>
+                  {/* Action buttons */}
+                  <View style={eaStyles.actionsRow}>
+                    {alert.alert_status === 'new' && (
+                      <TouchableOpacity style={eaStyles.ackBtn} onPress={() => handleAcknowledgeAlert(alert.alert_id)}>
+                        <Bell size={14} color="#fff" />
+                        <Text style={eaStyles.ackBtnText}>{t('staffAcknowledge') || "Acknowledge"}</Text>
                       </TouchableOpacity>
-
-                      <Text style={[styles.label, { marginTop: 12 }]}>Advice / Precautions</Text>
-                      <TextInput
-                        style={[styles.inputArea, { height: 60 }]}
-                        value={advice}
-                        onChangeText={setAdvice}
-                        placeholder="Write short advice..."
-                        multiline
-                      />
-
-                      <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
-                        <Save size={18} color="#fff" style={{ marginRight: 8 }} />
-                        <Text style={styles.saveRxText}>Save Prescription</Text>
+                    )}
+                    {(alert.alert_status === 'new' || alert.alert_status === 'acknowledged') && (
+                      <TouchableOpacity style={eaStyles.inProgressBtn} onPress={() => handleUpdateAlertStatus(alert.alert_id, 'in_progress')}>
+                        <Activity size={14} color="#fff" />
+                        <Text style={eaStyles.ackBtnText}>{t('staffInProgress') || "In Progress"}</Text>
                       </TouchableOpacity>
-                    </View>
-                  )}
-
-                  {/* 4B. UPLOAD PRESCRIPTION */}
-                  {prescriptionMode === 'upload' && (
-                    <View style={styles.panelContent}>
-                      <View style={styles.uploadArea}>
-                        <Upload size={48} color="#94a3b8" style={{ marginBottom: 12 }} />
-                        <Text style={styles.uploadText}>Tap to choose Image or PDF</Text>
-                        <TouchableOpacity style={styles.chooseFileBtn}>
-                          <Text style={styles.chooseFileText}>Choose File</Text>
-                        </TouchableOpacity>
-                      </View>
-                      <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
-                        <Save size={18} color="#fff" style={{ marginRight: 8 }} />
-                        <Text style={styles.saveRxText}>Save Prescription</Text>
+                    )}
+                    {alert.alert_status !== 'resolved' && (
+                      <TouchableOpacity style={eaStyles.resolveBtn} onPress={() => handleUpdateAlertStatus(alert.alert_id, 'resolved')}>
+                        <CheckCircle2 size={14} color="#fff" />
+                        <Text style={eaStyles.ackBtnText}>{t('staffResolve') || "Resolve"}</Text>
                       </TouchableOpacity>
-                    </View>
-                  )}
+                    )}
+                  </View>
 
-                  {/* 4C. SCAN PRESCRIPTION */}
-                  {prescriptionMode === 'scan' && (
-                    <View style={styles.panelContent}>
-                      <View style={styles.scanArea}>
-                        <Camera size={48} color="#94a3b8" style={{ marginBottom: 12 }} />
-                        <Text style={styles.uploadText}>Camera Preview</Text>
-                        <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
-                          <TouchableOpacity style={[styles.chooseFileBtn, { backgroundColor: '#e2e8f0' }]}>
-                            <Text style={[styles.chooseFileText, { color: '#475569' }]}>Start Camera</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity style={styles.chooseFileBtn}>
-                            <Text style={styles.chooseFileText}>Capture Scan</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                      <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
-                        <Save size={18} color="#fff" style={{ marginRight: 8 }} />
-                        <Text style={styles.saveRxText}>Save Prescription</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
                 </View>
-              )}
-
-            </View>
-          ) : (
-            <View style={styles.emptyState}>
-              <CheckCircle2 size={64} color="#22c55e" style={{ marginBottom: 16 }} />
-              <Text style={styles.emptyTitle}>Queue Clear</Text>
-              <Text style={styles.emptySub}>No patients waiting for consultation.</Text>
-            </View>
-          )}
-
-          {/* 5. UPCOMING QUEUE SECTION */}
-          <View style={styles.queueSection}>
-            <Text style={styles.sectionTitle}>Upcoming Queue (All {upcomingQueue.length})</Text>
-            <ScrollView
-              style={styles.upcomingQueueScroll}
-              showsVerticalScrollIndicator={true}
-              nestedScrollEnabled={true}
-            >
-              {upcomingQueue.map((item) => (
-                <View key={item.id} style={styles.queueItem}>
-                  <View style={[styles.smallTokenCircle, { backgroundColor: getPriorityColors(item.type).bg }]}>
-                    <Text style={[styles.smallTokenText, { color: getPriorityColors(item.type).text }]}>
-                      {formatTokenId(item.id)}
-                    </Text>
-                  </View>
-                  <View style={styles.queueItemInfo}>
-                    <Text style={styles.queueItemName}>{item.patient?.name || "Patient"}</Text>
-                    <Text style={styles.queueItemType}>{item.primaryDepartment || "General"}</Text>
-                  </View>
-                  <View style={[styles.queueBadge, { borderColor: getPriorityColors(item.type).border }]}>
-                    <Text style={[styles.queueBadgeText, { color: getPriorityColors(item.type).text }]}>
-                      {getPriorityColors(item.type).name}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-              {upcomingQueue.length === 0 && (
-                <Text style={styles.emptyQueueText}>No upcoming patients.</Text>
-              )}
-            </ScrollView>
+              );
+            })}
           </View>
+        )}
 
-        </ScrollView>
-      )}
+        {/* 2. ACTIVE PATIENT CARD */}
+        {activePatient ? (
+          <View style={styles.activePatientContainer}>
+            <Text style={styles.sectionTitle}>{t('staffCurrentPatient') || "Current Patient"}</Text>
+            <Card style={styles.activeCard}>
+              <View style={styles.activeCardContent}>
+                <View style={styles.mainTokenArea}>
+                  <Text style={styles.tokenLabel}>{t('staffToken') || "TOKEN"}</Text>
+                  <Text style={styles.largeToken}>{formatTokenId(activePatient.id)}</Text>
+                  <View style={[styles.priorityBadge, { backgroundColor: getPriorityColors(activePatient.type).bg }]}>
+                    <Text style={[styles.priorityText, { color: getPriorityColors(activePatient.type).text }]}>
+                      {t(activePatient.type === 'emergency' ? 'emgEmergency' : activePatient.type === 'disabled' ? 'pdDisabled' : 'pdCommon') || getPriorityColors(activePatient.type).name}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.patientDetails}>
+                  <Text style={styles.patientName}>{activePatient.patient?.name || "Patient Name"}</Text>
+                  <Text style={styles.patientAge}>
+                    {activePatient.patient?.age || "--"} {t('staffYrs') || "Yrs"} • {t(activePatient.patient?.gender === 'male' ? 'emgMale' : activePatient.patient?.gender === 'female' ? 'emgFemale' : activePatient.patient?.gender === 'other' ? 'emgOther' : '') || activePatient.patient?.gender?.charAt(0).toUpperCase() || "U"}
+                  </Text>
+                  <View style={styles.infoRow}>
+                    <Stethoscope size={14} color="#64748b" />
+                    <Text style={styles.infoText}>{t(activePatient.primaryDepartment === 'Emergency' ? 'pdEmergency' : activePatient.primaryDepartment === 'Pediatrics' ? 'Pediatrics' : 'pdCommon') || activePatient.primaryDepartment || "General Consultation"}</Text>
+                  </View>
+                  <View style={styles.infoRow}>
+                    <Activity size={14} color="#64748b" />
+                    <Text style={styles.infoText} numberOfLines={1}>
+                      {t('staffSymptoms') || "Symptoms"}: {activePatient.symptoms || "Standard check-up"}
+                    </Text>
+                  </View>
+                  <View style={styles.verifyContainer}>
+                    <Text style={styles.verifyText}>ID: {activePatient.id.substring(0, 8).toUpperCase()}</Text>
+                  </View>
+                </View>
+              </View>
+            </Card>
+
+            {/* 3. MAIN ACTION AREA */}
+            <View style={styles.mainActionArea}>
+              <TouchableOpacity
+                style={[styles.primaryActionBtn, prescriptionMode ? styles.activeActionBtn : null]}
+                onPress={() => setPrescriptionMode(prescriptionMode ? null : 'template')}
+              >
+                <FileText size={20} color={prescriptionMode ? "#fff" : "#2563eb"} />
+                <Text style={[styles.primaryActionText, prescriptionMode && { color: "#fff" }]}>{t('staffPrescription') || "Prescription"}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.completeBtn} onPress={handleMarkComplete}>
+                <CheckCircle2 size={24} color="#fff" />
+                <Text style={styles.completeBtnText}>{t('staffMarkComplete') || "Mark Complete"}</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* QR Scanner Section */}
+            <TouchableOpacity style={styles.scanQrBtn} onPress={openScanner}>
+              <QrCode size={20} color="#fff" />
+              <Text style={styles.scanQrBtnText}>{t('staffScanQrCode') || "Scan QR Code"}</Text>
+            </TouchableOpacity>
+
+            {/* QR Scanner Camera */}
+            {scannerOpen && (
+              <View style={styles.scannerContainer}>
+                <View style={styles.scannerHeader}>
+                  <Text style={styles.scannerTitle}>📷 {t('staffScanning') || "Scanning..."}</Text>
+                  <TouchableOpacity onPress={closeScanner} style={styles.closeScannerBtn}>
+                    <Text style={styles.closeScannerText}>✕ {t('staffClose') || "Close"}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.cameraWrapper}>
+                  <CameraView
+                    style={styles.camera}
+                    facing="back"
+                    barcodeScannerSettings={{
+                      barcodeTypes: ["qr"],
+                    }}
+                    onBarcodeScanned={handleBarCodeScanned}
+                  />
+                  {/* Scan overlay frame */}
+                  <View style={styles.scanOverlay}>
+                    <View style={styles.scanFrame}>
+                      <View style={[styles.scanCorner, styles.scanCornerTL]} />
+                      <View style={[styles.scanCorner, styles.scanCornerTR]} />
+                      <View style={[styles.scanCorner, styles.scanCornerBL]} />
+                      <View style={[styles.scanCorner, styles.scanCornerBR]} />
+                    </View>
+                    <Text style={styles.scanHintText}>{t('staffAlignFrame') || "Align QR code within the frame"}</Text>
+                  </View>
+                </View>
+              </View>
+            )}
+
+
+            {/* Scan Result: Completed Patient */}
+            {lastScannedPatient && (
+              <View style={styles.scanResultContainer}>
+                <View style={styles.completedCard}>
+                  <View style={styles.completedHeader}>
+                    <CheckCircle2 size={20} color="#16a34a" />
+                    <Text style={styles.completedHeaderText}>{t('staffAppCompleted') || "Appointment Completed"}</Text>
+                  </View>
+                  <View style={styles.completedBody}>
+                    <View style={styles.completedTokenCircle}>
+                      <Text style={styles.completedTokenText}>{formatTokenId(lastScannedPatient.id)}</Text>
+                    </View>
+                    <View style={styles.completedInfo}>
+                      <Text style={styles.completedName}>{lastScannedPatient.patient?.name || "Patient"}</Text>
+                      <Text style={styles.completedDetail}>
+                        {lastScannedPatient.patient?.age || "--"} {t('staffYrs') || "Yrs"} • {lastScannedPatient.primaryDepartment || "General"}
+                      </Text>
+                      <View style={styles.completedBadge}>
+                        <Text style={styles.completedBadgeText}>✓ {t('done') || "Done"}</Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Next Patient's Turn */}
+                {nextPatientAfterScan ? (
+                  <View style={styles.nextPatientCard}>
+                    <View style={styles.nextPatientHeader}>
+                      <Activity size={18} color="#2563eb" />
+                      <Text style={styles.nextPatientHeaderText}>{t('staffNextPatient') || "Next Patient's Turn"}</Text>
+                    </View>
+                    <View style={styles.nextPatientBody}>
+                      <View style={[styles.nextTokenCircle, { backgroundColor: getPriorityColors(nextPatientAfterScan.type).bg }]}>
+                        <Text style={[styles.nextTokenText, { color: getPriorityColors(nextPatientAfterScan.type).text }]}>
+                          {formatTokenId(nextPatientAfterScan.id)}
+                        </Text>
+                      </View>
+                      <View style={styles.nextPatientInfo}>
+                        <Text style={styles.nextPatientName}>{nextPatientAfterScan.patient?.name || "Patient"}</Text>
+                        <Text style={styles.nextPatientDetail}>
+                          {nextPatientAfterScan.patient?.age || "--"} {t('staffYrs') || "Yrs"} • {nextPatientAfterScan.primaryDepartment || "General"}
+                        </Text>
+                      </View>
+                      <View style={[styles.nextPriorityBadge, { borderColor: getPriorityColors(nextPatientAfterScan.type).border }]}>
+                        <Text style={[styles.nextPriorityText, { color: getPriorityColors(nextPatientAfterScan.type).text }]}>
+                          {t(nextPatientAfterScan.type === 'emergency' ? 'emgEmergency' : nextPatientAfterScan.type === 'disabled' ? 'pdDisabled' : 'pdCommon') || getPriorityColors(nextPatientAfterScan.type).name}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.noMorePatientsCard}>
+                    <CheckCircle2 size={24} color="#22c55e" />
+                    <Text style={styles.noMorePatientsText}>{t('staffAllCompleted') || "All appointments completed! 🎉"}</Text>
+                  </View>
+                )}
+
+              </View>
+            )}
+
+            {/* 4. PRESCRIPTION PANEL */}
+            {prescriptionMode && (
+              <View style={styles.prescriptionPanel}>
+                {/* 3 Row-wise options */}
+                <View style={styles.prescriptionTabs}>
+                  <TouchableOpacity
+                    style={[styles.tabBtn, prescriptionMode === 'template' && styles.activeTab]}
+                    onPress={() => setPrescriptionMode('template')}
+                  >
+                    <Text style={[styles.tabText, prescriptionMode === 'template' && styles.activeTabText]}>{t('useTemplate') || "Template"}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.tabBtn, prescriptionMode === 'upload' && styles.activeTab]}
+                    onPress={() => setPrescriptionMode('upload')}
+                  >
+                    <Text style={[styles.tabText, prescriptionMode === 'upload' && styles.activeTabText]}>{t('uploadPrescription') || "Upload"}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.tabBtn, prescriptionMode === 'scan' && styles.activeTab]}
+                    onPress={() => setPrescriptionMode('scan')}
+                  >
+                    <Text style={[styles.tabText, prescriptionMode === 'scan' && styles.activeTabText]}>{t('scanQr') || "Scan"}</Text>
+                  </TouchableOpacity>
+                </View>
+
+
+                {/* 4A. USE PRESCRIPTION TEMPLATE */}
+                {prescriptionMode === 'template' && (
+                  <View style={styles.panelContent}>
+                    <Text style={styles.subTitle}>{t('staffQuickTemplates') || "Quick Templates"}</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsContainer}>
+                      {TEMPLATES.map((tmpl, idx) => (
+                        <TouchableOpacity key={idx} style={styles.chip} onPress={() => handleApplyTemplate(tmpl)}>
+                          <Text style={styles.chipText}>{tmpl.name}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+
+                    <Text style={styles.label}>{t('staffDiagnosis') || "Problem / Diagnosis"}</Text>
+                    <TextInput
+                      style={styles.inputArea}
+                      value={diagnosis}
+                      onChangeText={setDiagnosis}
+                      placeholder={t('staffDiagnosisPlaceholder') || "Enter diagnosis..."}
+                    />
+
+                    <Text style={[styles.label, { marginTop: 12 }]}>{t('staffMedicinesDosage') || "Medicines & Dosage"}</Text>
+                    {medicines.map((med, index) => (
+                      <View key={index} style={styles.medicineRow}>
+                        <TextInput
+                          style={[styles.inputField, { flex: 2 }]}
+                          placeholder={t('staffMedicineName') || "Medicine Name"}
+                          value={med.name}
+                          onChangeText={(v) => updateMedicine(index, 'name', v)}
+                        />
+                        <View style={styles.medCol}>
+                          <TextInput
+                            style={[styles.inputField, { marginBottom: 4 }]}
+                            placeholder={t('staffDosagePlaceholder') || "Dosage (e.g., 1-0-1)"}
+                            value={med.dosage}
+                            onChangeText={(v) => updateMedicine(index, 'dosage', v)}
+                          />
+                          <View style={styles.quickDosages}>
+                            {QUICK_DOSAGE.map(q => (
+                              <TouchableOpacity key={q} style={styles.dosageChip} onPress={() => updateMedicine(index, 'dosage', q)}>
+                                <Text style={styles.dosageChipText}>{q}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        </View>
+                        <TextInput
+                          style={[styles.inputField, { flex: 0.8 }]}
+                          placeholder={t('staffDays') || "Days"}
+                          value={med.days}
+                          keyboardType="numeric"
+                          onChangeText={(v) => updateMedicine(index, 'days', v)}
+                        />
+                      </View>
+                    ))}
+                    <TouchableOpacity style={styles.addMedBtn} onPress={addMedicineRow}>
+                      <Plus size={16} color="#2563eb" />
+                      <Text style={styles.addMedText}>{t('staffAddMedicine') || "Add Medicine"}</Text>
+                    </TouchableOpacity>
+
+                    <Text style={[styles.label, { marginTop: 12 }]}>{t('staffAdvice') || "Advice / Precautions"}</Text>
+                    <TextInput
+                      style={[styles.inputArea, { height: 60 }]}
+                      value={advice}
+                      onChangeText={setAdvice}
+                      placeholder={t('staffAdvicePlaceholder') || "Write short advice..."}
+                      multiline
+                    />
+
+                    <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
+                      <Save size={18} color="#fff" style={{ marginRight: 8 }} />
+                      <Text style={styles.saveRxText}>{t('staffSavePrescription') || "Save Prescription"}</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                )}
+
+                {/* 4B. UPLOAD PRESCRIPTION */}
+                {prescriptionMode === 'upload' && (
+                  <View style={styles.panelContent}>
+                    <View style={styles.uploadArea}>
+                      <Upload size={48} color="#94a3b8" style={{ marginBottom: 12 }} />
+                      <Text style={styles.uploadText}>{t('staffUploadDesc') || "Tap to choose Image or PDF"}</Text>
+                      <TouchableOpacity style={styles.chooseFileBtn}>
+                        <Text style={styles.chooseFileText}>{t('staffChooseFile') || "Choose File"}</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
+                      <Save size={18} color="#fff" style={{ marginRight: 8 }} />
+                      <Text style={styles.saveRxText}>{t('staffSavePrescription') || "Save Prescription"}</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {/* 4C. SCAN PRESCRIPTION */}
+                {prescriptionMode === 'scan' && (
+                  <View style={styles.panelContent}>
+                    <View style={styles.scanArea}>
+                      <Camera size={48} color="#94a3b8" style={{ marginBottom: 12 }} />
+                      <Text style={styles.uploadText}>{t('staffCameraPreview') || "Camera Preview"}</Text>
+                      <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
+                        <TouchableOpacity style={[styles.chooseFileBtn, { backgroundColor: '#e2e8f0' }]}>
+                          <Text style={[styles.chooseFileText, { color: '#475569' }]}>{t('staffStartCamera') || "Start Camera"}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.chooseFileBtn}>
+                          <Text style={styles.chooseFileText}>{t('staffCaptureScan') || "Capture Scan"}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    <TouchableOpacity style={styles.saveRxBtn} onPress={handleSavePrescription}>
+                      <Save size={18} color="#fff" style={{ marginRight: 8 }} />
+                      <Text style={styles.saveRxText}>{t('staffSavePrescription') || "Save Prescription"}</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+              </View>
+            )}
+
+          </View>
+        ) : (
+          <View style={styles.emptyState}>
+            <CheckCircle2 size={64} color="#22c55e" style={{ marginBottom: 16 }} />
+            <Text style={styles.emptyTitle}>{t('staffQueueClear') || "Queue Clear"}</Text>
+            <Text style={styles.emptySub}>{t('staffNoPatientsWaiting') || "No patients waiting for consultation."}</Text>
+          </View>
+        )}
+
+        {/* 5. UPCOMING QUEUE SECTION */}
+        <View style={styles.queueSection}>
+          <Text style={styles.sectionTitle}>{t('staffUpcomingQueue') || "Upcoming Queue"} ({t('active').toLowerCase() || "all"} {upcomingQueue.length})</Text>
+          <ScrollView
+            style={styles.upcomingQueueScroll}
+            showsVerticalScrollIndicator={true}
+            nestedScrollEnabled={true}
+          >
+            {upcomingQueue.map((item) => (
+              <View key={item.id} style={styles.queueItem}>
+                <View style={[styles.smallTokenCircle, { backgroundColor: getPriorityColors(item.type).bg }]}>
+                  <Text style={[styles.smallTokenText, { color: getPriorityColors(item.type).text }]}>
+                    {formatTokenId(item.id)}
+                  </Text>
+                </View>
+                <View style={styles.queueItemInfo}>
+                  <Text style={styles.queueItemName}>{item.patient?.name || "Patient"}</Text>
+                  <Text style={styles.queueItemType}>{t(item.primaryDepartment === 'Emergency' ? 'pdEmergency' : item.primaryDepartment === 'Pediatrics' ? 'Pediatrics' : 'pdCommon') || item.primaryDepartment || "General"}</Text>
+                </View>
+                <View style={[styles.queueBadge, { borderColor: getPriorityColors(item.type).border }]}>
+                  <Text style={[styles.queueBadgeText, { color: getPriorityColors(item.type).text }]}>
+                    {t(item.type === 'emergency' ? 'emgEmergency' : item.type === 'disabled' ? 'pdDisabled' : 'pdCommon') || getPriorityColors(item.type).name}
+                  </Text>
+                </View>
+              </View>
+            ))}
+            {upcomingQueue.length === 0 && (
+              <Text style={styles.emptyQueueText}>{t('staffNoUpcoming') || "No upcoming patients."}</Text>
+            )}
+          </ScrollView>
+        </View>
+
+
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -1683,335 +1293,41 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 22, fontWeight: "700", color: "#0f172a", marginBottom: 8 },
   emptySub: { fontSize: 15, color: "#64748b", textAlign: "center" },
   upcomingQueueScroll: { maxHeight: 350, marginTop: 4 },
+});
 
-  // ─── Main Tab Bar ───────────────────────────────────────────────────────
-  mainTabBar: {
-    flexDirection: "row",
-    borderTopWidth: 1,
-    borderTopColor: "#f1f5f9",
-    backgroundColor: "#ffffff",
-  },
-  mainTabBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 11,
-    borderBottomWidth: 2,
-    borderBottomColor: "transparent",
-  },
-  mainTabBtnActive: {
-    borderBottomColor: "#2563eb",
-    backgroundColor: "#eff6ff",
-  },
-  mainTabText: { fontSize: 13, fontWeight: "600", color: "#64748b" },
-  mainTabTextActive: { color: "#2563eb" },
-
-  // ─── Live Queue Display ─────────────────────────────────────────────────
-  liveHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 16,
-  },
-  liveTitle: { fontSize: 18, fontWeight: "800", color: "#0f172a" },
-  liveSubtitle: { fontSize: 13, color: "#64748b", marginTop: 2 },
-  liveUpdatedBadge: {
-    backgroundColor: "#f1f5f9",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
-  },
-  liveUpdatedText: { fontSize: 11, color: "#475569", fontWeight: "600" },
-  liveEmptyState: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 60,
-    backgroundColor: "#ffffff",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-  },
-  liveEmptyTitle: { fontSize: 20, fontWeight: "700", color: "#334155", marginTop: 16, marginBottom: 6 },
-  liveEmptySub: { fontSize: 14, color: "#94a3b8", textAlign: "center" },
-  liveCard: {
-    flexDirection: "row",
-    backgroundColor: "#ffffff",
+// ─── EMERGENCY ALERTS STYLES ───
+const eaStyles = StyleSheet.create({
+  section: { marginBottom: 24 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#dc2626', textTransform: 'uppercase', letterSpacing: 0.5 },
+  alertCard: {
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    marginBottom: 10,
-    overflow: "hidden",
-    elevation: 1,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-  },
-  liveAccentBar: { width: 5 },
-  liveCardBody: { flex: 1, padding: 14 },
-  liveDeptName: { fontSize: 15, fontWeight: "800", color: "#0f172a", marginBottom: 10 },
-  liveInfoRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#f8fafc",
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    marginBottom: 8,
-  },
-  liveInfoCell: { flex: 1, alignItems: "center" },
-  liveInfoLabel: { fontSize: 10, color: "#94a3b8", fontWeight: "700", letterSpacing: 0.5, marginBottom: 3, textTransform: "uppercase" },
-  liveInfoValue: { fontSize: 16, fontWeight: "900", color: "#0f172a" },
-  liveDivider: { width: 1, height: 36, backgroundColor: "#e2e8f0", marginHorizontal: 4 },
-  liveStatusBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 8,
-  },
-  liveStatusActive: { backgroundColor: "#f0fdf4" },
-  liveStatusPaused: { backgroundColor: "#fffbeb" },
-  liveStatusDot: { fontSize: 10 },
-  liveStatusText: { fontSize: 11, fontWeight: "700" },
-  liveQueueCount: { fontSize: 12, color: "#94a3b8", fontWeight: "500" },
-
-  // ─── Patient Records Tab ────────────────────────────────────────────────
-  downloadExcelBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#16a34a",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  downloadExcelText: {
-    color: "#ffffff",
-    fontWeight: "700",
-    fontSize: 14,
-  },
-  filterCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 16,
+    borderWidth: 2,
     padding: 16,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    marginBottom: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 3,
-    elevation: 1,
-  },
-  filterTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: "#1e293b",
     marginBottom: 12,
   },
-  filterRow: {
-    flexDirection: "row",
-    gap: 12,
-    flexWrap: "wrap",
-  },
-  filterCell: {
-    flex: 1,
-    minWidth: 150,
-  },
-  filterLabel: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#64748b",
-    marginBottom: 6,
-  },
-  filterSearchInput: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: "#1e293b",
-    backgroundColor: "#f8fafc",
-    width: "100%",
-  },
-  webSelect: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: "#1e293b",
-    backgroundColor: "#ffffff",
-    width: "100%",
-    outlineStyle: "none",
-  },
-  webDateInput: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: "#1e293b",
-    backgroundColor: "#ffffff",
-    width: "100%",
-    fontFamily: "inherit",
-    outlineStyle: "none",
-  },
-  quickDateRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  quickDateBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: "#f1f5f9",
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-  },
-  quickDateBtnActive: {
-    backgroundColor: "#eff6ff",
-    borderColor: "#2563eb",
-    borderWidth: 1,
-  },
-  quickDateText: {
-    fontSize: 12,
-    color: "#475569",
-    fontWeight: "600",
-  },
-  quickDateTextActive: {
-    color: "#2563eb",
-    fontWeight: "700",
-  },
-  customDateContainer: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#f1f5f9",
-  },
-  tableCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    marginBottom: 16,
-    overflow: "hidden",
-  },
-  tableContainer: {
-    minWidth: "100%",
-  },
-  tableRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderBottomWidth: 1,
-    borderBottomColor: "#f1f5f9",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-  },
-  tableHeaderRowStyle: {
-    backgroundColor: "#f8fafc",
-    borderBottomWidth: 2,
-    borderBottomColor: "#e2e8f0",
-  },
-  tableHeaderCell: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: "#475569",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  tableRowEven: {
-    backgroundColor: "#ffffff",
-  },
-  tableRowOdd: {
-    backgroundColor: "#fdfdfd",
-  },
-  tableBodyCell: {
-    fontSize: 13,
-    color: "#334155",
-    paddingRight: 8,
-  },
-  statusBadgeSmall: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    alignSelf: "flex-start",
-  },
-  statusBadgeServed: {
-    backgroundColor: "#f0fdf4",
-  },
-  statusBadgeWaiting: {
-    backgroundColor: "#fffbeb",
-  },
-  statusBadgeTextSmall: {
-    fontSize: 11,
-    fontWeight: "700",
-    textTransform: "capitalize",
-  },
-  tableLoadingState: {
-    paddingVertical: 60,
-    alignItems: "center",
-  },
-  tableLoadingText: {
-    color: "#64748b",
-    fontSize: 14,
-  },
-  tableEmptyState: {
-    paddingVertical: 60,
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 600,
-  },
-  tableEmptyText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#475569",
-  },
-  tableEmptySub: {
-    fontSize: 13,
-    color: "#94a3b8",
-    marginTop: 4,
-  },
-  paginationRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 12,
-  },
-  paginationBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: "#ffffff",
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-  },
-  paginationBtnDisabled: {
-    opacity: 0.5,
-    backgroundColor: "#f1f5f9",
-  },
-  paginationBtnText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#334155",
-  },
-  paginationLabel: {
-    fontSize: 13,
-    color: "#64748b",
-    fontWeight: "600",
-  },
+  alertHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  severityBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  severityBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800', letterSpacing: 1 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  statusBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  alertType: { fontSize: 18, fontWeight: '800', marginBottom: 4 },
+  patientName: { fontSize: 15, fontWeight: '600', color: '#1e293b', marginBottom: 8 },
+  conditionText: { fontSize: 13, color: '#475569', marginBottom: 10, lineHeight: 18, backgroundColor: 'rgba(255,255,255,0.6)', padding: 8, borderRadius: 8 },
+  detailsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  detailChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.7)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
+  detailChipText: { fontSize: 12, color: '#334155', fontWeight: '500' },
+  assistanceRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 8 },
+  assistanceLabel: { fontSize: 12, fontWeight: '600', color: '#64748b' },
+  assistanceText: { fontSize: 12, color: '#475569', flex: 1 },
+  timeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.06)' },
+  timeText: { fontSize: 11, color: '#64748b', fontWeight: '500' },
+  ackText: { fontSize: 11, color: '#2563eb', fontWeight: '600' },
+  actionsRow: { flexDirection: 'row', gap: 8 },
+  ackBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#2563eb', paddingVertical: 10, borderRadius: 10 },
+  inProgressBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#ea580c', paddingVertical: 10, borderRadius: 10 },
+  resolveBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#16a34a', paddingVertical: 10, borderRadius: 10 },
+  ackBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
 });
 
 export default StaffDashboard;

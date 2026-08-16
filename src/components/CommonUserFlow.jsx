@@ -1,5 +1,9 @@
+<<<<<<< HEAD
 var _interopRequireWildcard = require("@babel/runtime/helpers/interopRequireWildcard");
 var _interopRequireDefault = require("@babel/runtime/helpers/interopRequireDefault"); Object.defineProperty(exports, "__esModule", { value: true }); exports.CommonUserFlow = CommonUserFlow; var _toConsumableArray2 = _interopRequireDefault(require("@babel/runtime/helpers/toConsumableArray")); var _asyncToGenerator2 = _interopRequireDefault(require("@babel/runtime/helpers/asyncToGenerator")); var _slicedToArray2 = _interopRequireDefault(require("@babel/runtime/helpers/slicedToArray")); var _react = _interopRequireWildcard(require("react"));
+=======
+var _interopRequireDefault = require("@babel/runtime/helpers/interopRequireDefault"); Object.defineProperty(exports, "__esModule", { value: true }); exports.CommonUserFlow = CommonUserFlow; var _toConsumableArray2 = _interopRequireDefault(require("@babel/runtime/helpers/toConsumableArray")); var _slicedToArray2 = _interopRequireDefault(require("@babel/runtime/helpers/slicedToArray")); var _react = _interopRequireWildcard(require("react"));
+>>>>>>> origin/main
 var _reactNative = require("react-native");
 var _AppContext = require("../context/AppContext");
 var _useTranslation = require("../hooks/useTranslation");
@@ -10,8 +14,13 @@ var _label = require("./ui/label");
 var _select = require("./ui/select");
 
 var _badge = require("./ui/badge");
+<<<<<<< HEAD
 var _lucideReactNative = require("lucide-react-native"); var _jsxRuntime = require("react/jsx-runtime");
 // Firebase real-time integration active
+=======
+var _lucideReactNative = require("lucide-react-native"); var _jsxRuntime = require("react/jsx-runtime"); function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }
+// Assuming sonner is being used via some native equivalent or we can just use Alert
+>>>>>>> origin/main
 
 var manualTimeSlots = [
     { time: '09:00', label: '9:00 AM', crowdLevel: 'Low', color: '#16a34a' },
@@ -48,8 +57,13 @@ function CommonUserFlow() {
         timeSlot: '',
         autoTime: undefined,
         estimatedWait: 0,
-        queuePosition: 0
+        queuePosition: 0,
+        symptoms: ''
     }), _useState4 = (0, _slicedToArray2.default)(_useState3, 2), formData = _useState4[0], setFormData = _useState4[1];
+
+    // Duplicate-submit protection
+    var _useState5b = (0, _react.useState)(false), _useState6b = (0, _slicedToArray2.default)(_useState5b, 2), isBooking = _useState6b[0], setIsBooking = _useState6b[1];
+    var bookingInProgress = (0, _react.useRef)(false);
 
 
 
@@ -104,6 +118,8 @@ function CommonUserFlow() {
         endOfDay.setHours(23, 59, 59, 999);
         var patientId = `PAT-${dateStr}-${tokenNumber}`;
         var allDepartmentNames = state.departments.map(function (d) { return d.name; });
+        const deptObjForVisit = state.departments.find(d => d.name === formData.primaryDepartment);
+        const deptIdForVisit = deptObjForVisit ? deptObjForVisit.id : 'gen_med';
 
         return {
             id: tokenId,
@@ -117,9 +133,10 @@ function CommonUserFlow() {
                 phone: state.patientInfo.phone,
                 age: formData.age,
                 gender: formData.gender,
-                patientId: patientId
+                patientId: patientId,
+                symptoms: formData.symptoms || ''
             },
-            status: 'active',
+            status: 'waiting',
             priority: 1,
             qrCode: tokenId,
             validUntil: endOfDay,
@@ -127,13 +144,24 @@ function CommonUserFlow() {
             schedulingMethod: formData.schedulingMethod,
             estimatedWaitTime: formData.estimatedWait,
             positionInQueue: formData.queuePosition,
-            visits: [],
+            visits: [{
+                id: 'visit-' + Date.now(),
+                department_id: deptIdForVisit,
+                department: formData.primaryDepartment,
+                status: 'waiting',
+                sequence_order: 1,
+                room_counter: null,
+                doctorName: null,
+                notes: null,
+                timestamp: now
+            }],
             prescriptions: [],
             labTests: [],
             departmentAccess: allDepartmentNames
         };
     };
 
+<<<<<<< HEAD
 var _firebase = require("../services/firebase");
 
     var handleTokenGeneration = /*#__PURE__*/function () {
@@ -207,9 +235,81 @@ var _firebase = require("../services/firebase");
                 });
             } catch (error) {
                 console.error("Firestore Transaction Error (CommonUserFlow):", error);
+=======
+    var handleTokenGeneration = function handleTokenGeneration() {
+        if (bookingInProgress.current || isBooking) return;
+        if (formData.schedulingMethod === 'manual' && !formData.timeSlot) {
+            return;
+        }
+        bookingInProgress.current = true;
+        setIsBooking(true);
+        try {
+            var newToken = generateToken();
+            var _supabaseClient = require("../services/supabaseClient");
+            const deptObj = state.departments.find(d => d.name === formData.primaryDepartment);
+            const deptId = deptObj ? deptObj.id : 'gen_med';
+            
+             _supabaseClient.supabase.from('queue').insert({
+                token_id: newToken.id,
+                patient_name: newToken.patient.name,
+                doctor_id: (formData.assignedDoctor && formData.assignedDoctor !== 'any') ? formData.assignedDoctor : null,
+                status: 'waiting',
+                department: formData.primaryDepartment,
+                patient_phone: formData.isAssisted ? (formData.phone || '') : (state.patientInfo.phone || ''),
+                patient_age: formData.isAssisted ? parseInt(formData.age || '0') : null,
+                patient_gender: formData.isAssisted ? formData.gender : null,
+                booking_type: formData.isAssisted ? 'assisted' : 'self',
+                token_data: newToken
+            }).then(function(res) {
+                if (res.error) {
+                    console.error("Supabase queue insert failed:", {
+                        message: res.error.message,
+                        code: res.error.code,
+                        details: res.error.details,
+                        hint: res.error.hint
+                    });
+                    bookingInProgress.current = false;
+                    setIsBooking(false);
+                } else {
+                    _supabaseClient.supabase.from('queue_visits').insert({
+                        token_id: newToken.id,
+                        department_id: deptId,
+                        doctor_id: (formData.assignedDoctor && formData.assignedDoctor !== 'any') ? formData.assignedDoctor : null,
+                        status: 'waiting',
+                        sequence_order: 1
+                    }).then(function(vRes) {
+                        if (vRes.error) {
+                            console.error("Supabase queue_visits insert failed:", {
+                                message: vRes.error.message,
+                                code: vRes.error.code,
+                                details: vRes.error.details,
+                                hint: vRes.error.hint
+                            });
+                            // Cleanup queue table to maintain consistency
+                            _supabaseClient.supabase.from('queue').delete().eq('token_id', newToken.id).catch(console.error);
+                            bookingInProgress.current = false;
+                            setIsBooking(false);
+                        }
+                    });
+                }
+            });
+
+            setState(function (prev) {
+                return Object.assign({},
+                    prev, {
+                    tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens), [newToken]),
+                    currentToken: newToken,
+                    currentView: 'token'
+                });
+>>>>>>> origin/main
             }
-        }); return function handleTokenGeneration() { return _ref.apply(this, arguments); };
-    }();
+            );
+        } catch (error) {
+            console.log(error);
+            bookingInProgress.current = false;
+            setIsBooking(false);
+        }
+    };
 
     if (!state.patientInfo) return null;
 
@@ -275,11 +375,11 @@ var _firebase = require("../services/firebase");
                             style: { gap: 16 }, children: [/*#__PURE__*/
                                 (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                     children: [/*#__PURE__*/
-                                        (0, _jsxRuntime.jsx)(_label.Label, { children: "Name" }),/*#__PURE__*/
+                                        (0, _jsxRuntime.jsx)(_label.Label, { children: t.fullName || "Full Name" }),/*#__PURE__*/
                                         (0, _jsxRuntime.jsx)(_input.Input, {
                                             value: formData.name,
                                             onChangeText: function onChangeText(val) { return setFormData(Object.assign({}, formData, { name: val })); },
-                                            placeholder: "Enter patient name"
+                                            placeholder: t.fullNamePlaceholder || "Enter patient name"
                                         })]
                                 }),/*#__PURE__*/
                                 (0, _jsxRuntime.jsxs)(_reactNative.View, {
@@ -307,7 +407,7 @@ var _firebase = require("../services/firebase");
                                                         (0, _jsxRuntime.jsxs)(_reactNative.TouchableOpacity, {
                                                             onPress: function onPress() { return setFormData(Object.assign({}, formData, { gender: option })); }, style: styles.radioOption, children: [/*#__PURE__*/
                                                                 (0, _jsxRuntime.jsx)(RadioIcon, { size: 20, color: isSelected ? '#2563eb' : '#9ca3af' }),/*#__PURE__*/
-                                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: styles.radioText, children: option.charAt(0).toUpperCase() + option.slice(1) })]
+                                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: styles.radioText, children: t[option] || (option.charAt(0).toUpperCase() + option.slice(1)) })]
                                                         }, option
                                                         ));
 
@@ -316,6 +416,16 @@ var _firebase = require("../services/firebase");
                                         )]
                                 }
                                 ),/*#__PURE__*/
+
+                                (0, _jsxRuntime.jsxs)(_reactNative.View, {
+                                     children: [/*#__PURE__*/
+                                         (0, _jsxRuntime.jsx)(_label.Label, { children: t.symptoms || "Symptoms" }),/*#__PURE__*/
+                                         (0, _jsxRuntime.jsx)(_input.Input, {
+                                             value: formData.symptoms,
+                                             onChangeText: function onChangeText(val) { return setFormData(Object.assign({}, formData, { symptoms: val })); },
+                                             placeholder: t.symptomsPlaceholder || "Describe your symptoms"
+                                         })]
+                                 }),/*#__PURE__*/
 
                                 (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                     children: [/*#__PURE__*/
@@ -483,8 +593,8 @@ var _firebase = require("../services/firebase");
                                 }
                                 ),/*#__PURE__*/
                                 (0, _jsxRuntime.jsx)(_button.Button, {
-                                    onPress: handleTokenGeneration, disabled: !formData.timeSlot, style: { marginTop: 16 }, children:/*#__PURE__*/
-                                        (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff' }, children: t.bookAppointment })
+                                    onPress: handleTokenGeneration, disabled: !formData.timeSlot || isBooking, style: { marginTop: 16 }, children:/*#__PURE__*/
+                                        (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff' }, children: isBooking ? (t.generatingToken || 'Generating token...') : t.bookAppointment })
                                 }
                                 )]
                         }

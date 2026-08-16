@@ -11,8 +11,33 @@ var _checkbox = require("./ui/checkbox");
 
 var _select = require("./ui/select");
 
+<<<<<<< HEAD
 var _lucideReactNative = require("lucide-react-native"); var _jsxRuntime = require("react/jsx-runtime");
 // Firebase real-time integration active
+=======
+var _textarea = require("./ui/textarea");
+var _lucideReactNative = require("lucide-react-native"); var _jsxRuntime = require("react/jsx-runtime"); function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }
+var _supabaseClient = require("../services/supabaseClient");
+var _useTranslation = require("../hooks/useTranslation");
+
+var disabilityTypeKeys = {
+    mobility: 'accMobility',
+    visual: 'accVisual',
+    hearing: 'accHearing',
+    cognitive: 'accCognitive',
+    multiple: 'accMultiple',
+    other: 'accOther'
+};
+
+var assistanceOptionKeys = {
+    'Wheelchair assistance': 'emgWheelchair',
+    'Sign language interpreter': 'emgSignLanguage',
+    'Audio assistance': 'emgAudio',
+    'Personal care attendant': 'emgPersonalCare',
+    'Accessible restroom': 'emgRestroom'
+};
+
+>>>>>>> origin/main
 
 var disabilityTypes = [
     { value: 'mobility', label: 'Mobility Impairment', icon: _lucideReactNative.User },
@@ -51,7 +76,9 @@ var assistanceOptions = [
 
 function DisabledUserFlow() {
     var _useAppContext = (0, _AppContext.useAppContext)(), state = _useAppContext.state, setState = _useAppContext.setState;
+    var _useTranslation2 = (0, _useTranslation.useTranslation)(), t = _useTranslation2.t;
     var _useState = (0, _react.useState)({
+
         name: state.patientInfo ? state.patientInfo.name : '',
         email: '',
         phone: '',
@@ -143,6 +170,7 @@ function DisabledUserFlow() {
                 console.log('Please select assistance needed');
                 return;
             }
+<<<<<<< HEAD
             
             var _firebase = require("../services/firebase");
             var userService = require("../services/userService");
@@ -198,6 +226,21 @@ function DisabledUserFlow() {
                     return function (_x) { return _tr.apply(this, arguments); };
                 }());
                 
+=======
+
+            try {
+                var newToken = generateDisabledToken();
+
+                // Insert into Supabase logic
+                yield _supabaseClient.supabase.from('queue').insert([{
+                    token_id: newToken.id,
+                    patient_name: newToken.patient.name,
+                    department: newToken.primaryDepartment,
+                    doctor_id: formData.assignedDoctor || null, // Assuming no assigned doc explicitly defined in disability flow yet
+                    status: 'waiting'
+                }]);
+
+>>>>>>> origin/main
                 setState(function (prev) {
                     return Object.assign({},
                         prev, {
@@ -234,8 +277,8 @@ function DisabledUserFlow() {
                                         ),/*#__PURE__*/
                                         (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                             children: [/*#__PURE__*/
-                                                (0, _jsxRuntime.jsx)(_card.CardTitle, { style: { color: '#0ea5e9' }, children: "Accessibility Services" }),/*#__PURE__*/
-                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#0369a1', fontSize: 13, fontWeight: '500' }, children: "Priority care" })]
+                                                (0, _jsxRuntime.jsx)(_card.CardTitle, { style: { color: '#0ea5e9' }, children: t('accTitle') }),/*#__PURE__*/
+                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#0369a1', fontSize: 13, fontWeight: '500' }, children: t('accSubtitle') })]
                                         }
                                         )]
                                 }
@@ -250,8 +293,8 @@ function DisabledUserFlow() {
                     style: [styles.cardSpacing, { backgroundColor: '#f0fdfa', borderLeftWidth: 6, borderLeftColor: '#14b8a6' }], children:/*#__PURE__*/
                         (0, _jsxRuntime.jsxs)(_card.CardContent, {
                             style: { paddingTop: 0 }, children: [/*#__PURE__*/
-                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { fontWeight: '700', color: '#0f172a', marginBottom: 4 }, children: "Comprehensive Support" }),/*#__PURE__*/
-                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { fontSize: 14, color: '#475569', lineHeight: 20 }, children: "We provide priority service and specialized assistance for patients with disabilities." })]
+                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { fontWeight: '700', color: '#0f172a', marginBottom: 4 }, children: t('accComprehensiveSupport') }),/*#__PURE__*/
+                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { fontSize: 14, color: '#475569', lineHeight: 20 }, children: t('accComprehensiveSupportDesc') })]
                         }
                         )
                 }
@@ -261,11 +304,11 @@ function DisabledUserFlow() {
                     style: styles.cardSpacing, children:/*#__PURE__*/
                         (0, _jsxRuntime.jsxs)(_card.CardContent, {
                             style: { paddingTop: 16, gap: 16 }, children: [/*#__PURE__*/
-                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: styles.sectionTitle, children: "Medical Information" }),/*#__PURE__*/
+                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: styles.sectionTitle, children: t('accMedicalInfo') }),/*#__PURE__*/
 
                                 (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                     children: [/*#__PURE__*/
-                                        (0, _jsxRuntime.jsx)(_label.Label, { children: "Name" }),/*#__PURE__*/
+                                        (0, _jsxRuntime.jsx)(_label.Label, { children: t('accName') }),/*#__PURE__*/
                                         (0, _jsxRuntime.jsx)(_input.Input, {
                                             value: formData.name,
                                             onChangeText: function onChangeText(val) { return setFormData(Object.assign({}, formData, { name: val })); },
@@ -274,7 +317,7 @@ function DisabledUserFlow() {
                                 }),/*#__PURE__*/
                                 (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                     children: [/*#__PURE__*/
-                                        (0, _jsxRuntime.jsx)(_label.Label, { children: "Age" }),/*#__PURE__*/
+                                        (0, _jsxRuntime.jsx)(_label.Label, { children: t('accAge') }),/*#__PURE__*/
                                         (0, _jsxRuntime.jsx)(_input.Input, {
                                             keyboardType: "numeric",
                                             value: formData.age ? String(formData.age) : '',
@@ -286,17 +329,18 @@ function DisabledUserFlow() {
 
                                 (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                     children: [/*#__PURE__*/
-                                        (0, _jsxRuntime.jsx)(_label.Label, { children: "Gender" }),/*#__PURE__*/
+                                        (0, _jsxRuntime.jsx)(_label.Label, { children: t('accGender') }),/*#__PURE__*/
                                         (0, _jsxRuntime.jsx)(_reactNative.View, {
                                             style: styles.radioGroup, children:
                                                 ['male', 'female', 'other'].map(function (option) {
                                                     var isSelected = formData.gender === option;
                                                     var RadioIcon = isSelected ? _lucideReactNative.CircleDot : _lucideReactNative.Circle;
+                                                    var genderTranslate = option === 'male' ? t('emgMale') : option === 'female' ? t('emgFemale') : t('emgOther');
                                                     return (/*#__PURE__*/
                                                         (0, _jsxRuntime.jsxs)(_reactNative.TouchableOpacity, {
                                                             onPress: function onPress() { return setFormData(Object.assign({}, formData, { gender: option })); }, style: styles.radioOption, children: [/*#__PURE__*/
                                                                 (0, _jsxRuntime.jsx)(RadioIcon, { size: 20, color: isSelected ? '#2563eb' : '#9ca3af' }),/*#__PURE__*/
-                                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: styles.radioText, children: option.charAt(0).toUpperCase() + option.slice(1) })]
+                                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: styles.radioText, children: genderTranslate })]
                                                         }, option
                                                         ));
 
@@ -308,12 +352,12 @@ function DisabledUserFlow() {
 
                                 (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                     children: [/*#__PURE__*/
-                                        (0, _jsxRuntime.jsx)(_label.Label, { children: "Primary Department" }),/*#__PURE__*/
+                                        (0, _jsxRuntime.jsx)(_label.Label, { children: t('accPrimaryDepartment') }),/*#__PURE__*/
                                         (0, _jsxRuntime.jsxs)(_select.Select, {
                                             value: formData.primaryDepartment, onValueChange: function onValueChange(val) { return setFormData(Object.assign({}, formData, { primaryDepartment: val })); }, children: [/*#__PURE__*/
                                                 (0, _jsxRuntime.jsx)(_select.SelectTrigger, {
                                                     style: { marginTop: 8 }, children:/*#__PURE__*/
-                                                        (0, _jsxRuntime.jsx)(_select.SelectValue, { placeholder: "Select primary department" })
+                                                        (0, _jsxRuntime.jsx)(_select.SelectValue, { placeholder: t('accSelectDept') })
                                                 }
                                                 ),/*#__PURE__*/
                                                 (0, _jsxRuntime.jsx)(_select.SelectContent, {
@@ -334,15 +378,16 @@ function DisabledUserFlow() {
                                 }
                                 ),/*#__PURE__*/
 
-                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: [styles.sectionTitle, { marginTop: 16 }], children: "Accessibility Information" }),/*#__PURE__*/
+                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: [styles.sectionTitle, { marginTop: 16 }], children: t('accAccessibilityInfo') }),/*#__PURE__*/
 
                                 (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                     children: [/*#__PURE__*/
-                                        (0, _jsxRuntime.jsx)(_label.Label, { children: "Type of Accessibility Need" }),/*#__PURE__*/
+                                        (0, _jsxRuntime.jsx)(_label.Label, { children: t('accTypeOfNeed') }),/*#__PURE__*/
                                         (0, _jsxRuntime.jsx)(_reactNative.View, {
                                             style: styles.grid, children:
                                                 disabilityTypes.map(function (type) {
                                                     var Icon = type.icon;
+                                                    var labelTranslate = t(disabilityTypeKeys[type.value]) || type.label;
                                                     return (/*#__PURE__*/
                                                         (0, _jsxRuntime.jsxs)(_reactNative.TouchableOpacity, {
 
@@ -350,7 +395,7 @@ function DisabledUserFlow() {
                                                             onPress: function onPress() { return setFormData(Object.assign({}, formData, { disabilityType: type.value })); }, children: [/*#__PURE__*/
 
                                                                 (0, _jsxRuntime.jsx)(Icon, { size: 16, color: formData.disabilityType === type.value ? '#2563eb' : '#4b5563' }),/*#__PURE__*/
-                                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { marginLeft: 8, fontSize: 13, flexShrink: 1 }, children: type.label })]
+                                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { marginLeft: 8, fontSize: 13, flexShrink: 1 }, children: labelTranslate })]
                                                         }, type.value
                                                         ));
 
@@ -362,7 +407,7 @@ function DisabledUserFlow() {
 
                                 (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                     children: [/*#__PURE__*/
-                                        (0, _jsxRuntime.jsx)(_label.Label, { children: "Additional Details" }),/*#__PURE__*/
+                                        (0, _jsxRuntime.jsx)(_label.Label, { children: t('accAdditionalDetails') }),/*#__PURE__*/
                                         (0, _jsxRuntime.jsx)(_textarea.Textarea, {
                                             value: formData.disabilityDetails,
                                             onChangeText: function onChangeText(val) { return setFormData(Object.assign({}, formData, { disabilityDetails: val })); },
@@ -375,12 +420,12 @@ function DisabledUserFlow() {
 
                                 (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                     children: [/*#__PURE__*/
-                                        (0, _jsxRuntime.jsx)(_label.Label, { children: "Priority Level" }),/*#__PURE__*/
+                                        (0, _jsxRuntime.jsx)(_label.Label, { children: t('accPriorityLevel') }),/*#__PURE__*/
                                         (0, _jsxRuntime.jsx)(_reactNative.View, {
                                             style: styles.radioGroup, children:
                                                 [
-                                                    { value: 'normal', label: 'Standard Priority' },
-                                                    { value: 'priority', label: 'High Priority' }].
+                                                    { value: 'normal', label: t('accStandardPriority') },
+                                                    { value: 'priority', label: t('accHighPriority') }].
                                                     map(function (option) {
                                                         var isSelected = formData.urgency === option.value;
                                                         var RadioIcon = isSelected ? _lucideReactNative.CircleDot : _lucideReactNative.Circle;
@@ -398,7 +443,7 @@ function DisabledUserFlow() {
                                 }
                                 ),/*#__PURE__*/
 
-                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: [styles.sectionTitle, { marginTop: 16 }], children: "Support Services Required" }),/*#__PURE__*/
+                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: [styles.sectionTitle, { marginTop: 16 }], children: t('accSupportServicesRequired') }),/*#__PURE__*/
 
 
                                 (0, _jsxRuntime.jsxs)(_reactNative.View, {
@@ -412,7 +457,7 @@ function DisabledUserFlow() {
                                                             onCheckedChange: function onCheckedChange(checked) { return handleAssistanceChange(opt, !!checked); }
                                                         }
                                                         ),/*#__PURE__*/
-                                                        (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { marginLeft: 8 }, children: opt })]
+                                                        (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { marginLeft: 8 }, children: t(assistanceOptionKeys[opt]) || opt })]
                                                 }, opt
                                                 ));
                                         }
@@ -426,14 +471,14 @@ function DisabledUserFlow() {
                                                     }
                                                 }
                                                 ),/*#__PURE__*/
-                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { marginLeft: 8 }, children: "Other" })]
+                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { marginLeft: 8 }, children: t('accOther') })]
                                         }
                                         ),
                                         formData.otherAssistance.trim() !== '' &&/*#__PURE__*/
                                         (0, _jsxRuntime.jsx)(_input.Input, {
                                             value: formData.otherAssistance,
                                             onChangeText: function onChangeText(val) { return setFormData(Object.assign({}, formData, { otherAssistance: val })); },
-                                            placeholder: "Specify assistance",
+                                            placeholder: t('accSpecifyAssistance'),
                                             style: { marginTop: 8, marginLeft: 32 }
                                         }
                                         )]
@@ -441,15 +486,15 @@ function DisabledUserFlow() {
 
                                 ),/*#__PURE__*/
 
-                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: [styles.sectionTitle, { marginTop: 16 }], children: "Caregiver Info (Optional)" }),/*#__PURE__*/
+                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: [styles.sectionTitle, { marginTop: 16 }], children: t('accCaregiverInfo') }),/*#__PURE__*/
                                 (0, _jsxRuntime.jsx)(_input.Input, {
-                                    placeholder: "Name",
+                                    placeholder: t('accCaregiverName'),
                                     value: formData.caregiverName,
                                     onChangeText: function onChangeText(val) { return setFormData(Object.assign({}, formData, { caregiverName: val })); }
                                 }
                                 ),/*#__PURE__*/
                                 (0, _jsxRuntime.jsx)(_input.Input, {
-                                    placeholder: "Phone",
+                                    placeholder: t('accCaregiverPhone'),
                                     keyboardType: "phone-pad",
                                     value: formData.caregiverPhone,
                                     onChangeText: function onChangeText(val) { return setFormData(Object.assign({}, formData, { caregiverPhone: val })); }
@@ -458,7 +503,7 @@ function DisabledUserFlow() {
 
                                 (0, _jsxRuntime.jsx)(_button.Button, {
                                     onPress: handleFormSubmit, style: { marginTop: 16 }, children:/*#__PURE__*/
-                                        (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff', fontWeight: 'bold' }, children: "Generate Priority Token" })
+                                        (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff', fontWeight: 'bold' }, children: t('accGenerateToken') })
                                 }
                                 )]
                         }
