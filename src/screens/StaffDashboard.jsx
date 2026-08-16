@@ -129,80 +129,23 @@ export function StaffDashboard() {
     return () => clearInterval(tick);
   }, []);
 
-  // Fetch patient records from Firestore when Patient Records tab is opened
+  // Derive dbRecords directly from live tokens for real-time consistency
+  useEffect(() => {
+    const recordsData = (appState.tokens || []).map((t) => ({
+      token_id: t.id,
+      patient_name: t.patient?.name || 'Walk-in Patient',
+      department: t.primaryDepartment || 'General',
+      doctor_id: t.assignedDoctor || null,
+      status: t.status === 'completed' ? 'completed' : 'active',
+      created_at: t.createdAt ? new Date(t.createdAt).toISOString() : new Date().toISOString()
+    }));
+    setDbRecords(recordsData);
+  }, [appState.tokens]);
+
   const fetchRecords = async () => {
-    setLoadingRecords(true);
-    try {
-      const querySnapshot = await getDocs(collection(db, 'tokens'));
-      const recordsData = [];
-      querySnapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        recordsData.push({
-          token_id: data.id || data.token_id || docSnap.id,
-          patient_name: data.patient?.name || data.patient_name || 'Walk-in Patient',
-          department: data.primaryDepartment || data.department || 'General',
-          doctor_id: data.assignedDoctor || null,
-          status: data.status === 'completed' ? 'completed' : 'active',
-          created_at: data.createdAt || data.timestamp || new Date().toISOString()
-        });
-      });
-      setDbRecords(recordsData);
-    } catch (err) {
-      console.error("Error fetching patient records from Firestore:", err);
-    } finally {
-      setLoadingRecords(false);
-    }
+    // Already synchronized in real-time from appState.tokens
+    setLoadingRecords(false);
   };
-
-  useEffect(() => {
-    if (activeTab === 'records') {
-      fetchRecords();
-    }
-  }, [activeTab]);
-
-  const getDoctorName = (doctorId, deptName) => {
-    if (!doctorId) return "Any Available";
-    const dept = appState.departments?.find(d => d.name === deptName);
-    if (dept) {
-      const doc = dept.doctors?.find(d => d.id === doctorId);
-      if (doc) return doc.name;
-    }
-    return doctorId; // fallback
-  };
-
-  // Firestore Real-Time Sync for Token Queue
-  useEffect(() => {
-    const tokensRef = collection(db, 'tokens');
-    const unsubscribe = onSnapshot(tokensRef, (snapshot) => {
-      const tokensList = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        const tokenId = data.id || data.token_id || docSnap.id;
-        tokensList.push({
-          id: tokenId,
-          type: data.type || (tokenId && tokenId.startsWith('EME') ? 'emergency' : tokenId && tokenId.startsWith('ACE') ? 'disabled' : 'common'),
-          primaryDepartment: data.primaryDepartment || data.department || 'General',
-          timestamp: data.createdAt ? new Date(data.createdAt) : new Date(),
-          patient: data.patient || { name: data.patient_name || 'Patient' },
-          status: data.status === 'completed' ? 'completed' : 'active',
-          qrCode: tokenId
-        });
-      });
-
-      if (tokensList.length > 0) {
-        setAppState(prev => {
-          const map = new Map();
-          prev.tokens.forEach(t => map.set(t.id, t));
-          tokensList.forEach(t => map.set(t.id, { ...map.get(t.id), ...t }));
-          return { ...prev, tokens: Array.from(map.values()) };
-        });
-      }
-    }, (err) => {
-      console.error("Firestore StaffDashboard subscription error:", err);
-    });
-
-    return () => unsubscribe();
-  }, []);
 
   const handleBack = () => {
     setAppState((prev) => ({ ...prev, currentView: "portal" }));
@@ -278,11 +221,11 @@ export function StaffDashboard() {
     if (!activePatient) return;
 
     try {
-      // Update Firestore tokens collection document
-      await updateDoc(doc(db, 'tokens', activePatient.id), {
+      // Update Firestore tokens collection document status
+      await setDoc(doc(db, 'tokens', activePatient.id), {
         status: 'completed',
         updatedAt: new Date().toISOString()
-      });
+      }, { merge: true });
 
       // Optimistic update
       const updatedTokens = appState.tokens.map((token) =>

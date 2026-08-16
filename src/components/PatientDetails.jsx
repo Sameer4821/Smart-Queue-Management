@@ -1,10 +1,11 @@
+var _interopRequireWildcard = require("@babel/runtime/helpers/interopRequireWildcard");
 var _interopRequireDefault = require("@babel/runtime/helpers/interopRequireDefault"); Object.defineProperty(exports, "__esModule", { value: true }); exports.PatientDetails = PatientDetails; var _defineProperty2 = _interopRequireDefault(require("@babel/runtime/helpers/defineProperty")); var _slicedToArray2 = _interopRequireDefault(require("@babel/runtime/helpers/slicedToArray")); var _react = _interopRequireWildcard(require("react"));
 var _reactNative = require("react-native");
 var _button = require("./ui/button");
 var _card = require("./ui/card");
 var _lucideReactNative = require("lucide-react-native");
 var _sonnerNative = require("sonner-native");
-var _useTranslation = require("../hooks/useTranslation"); var _jsxRuntime = require("react/jsx-runtime"); function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }
+var _useTranslation = require("../hooks/useTranslation"); var _jsxRuntime = require("react/jsx-runtime");
 
 function PatientDetails() {
     var _useAppContext = require("../context/AppContext").useAppContext(), state = _useAppContext.state, setState = _useAppContext.setState;
@@ -91,7 +92,7 @@ function PatientDetails() {
         }
     };
 
-    var handleVerifyOtp = function handleVerifyOtp() {
+    var handleVerifyOtp = async function handleVerifyOtp() {
         var otpValue = otp.join('');
         if (otpValue.length !== 4) {
             setOtpError(true);
@@ -101,16 +102,28 @@ function PatientDetails() {
 
         setLoading(true);
 
-        setTimeout(function () {
+        try {
             if (otpValue === '1234') { // Mock validation
+                var userService = require("../services/userService");
+                var asyncStorage = require("@react-native-async-storage/async-storage").default;
+                var phoneVal = formData.phone.trim();
+                var userRecord = await userService.getOrCreateUserByPhone(phoneVal);
+
+                var patientInfo = {
+                    name: userRecord.name || '',
+                    email: userRecord.email || '',
+                    phone: userRecord.phone || phoneVal,
+                    uid: userRecord.uid
+                };
+
+                try {
+                    await asyncStorage.setItem('current-patient-info', JSON.stringify(patientInfo));
+                } catch (e) {}
+
                 setState(function (prev) {
                     return Object.assign({},
                         prev, {
-                        patientInfo: {
-                            name: 'Patient', // Required placeholder
-                            email: '',
-                            phone: formData.phone.trim()
-                        },
+                        patientInfo: patientInfo,
                         currentView: 'patient-dashboard'
                     });
                 });
@@ -119,8 +132,13 @@ function PatientDetails() {
                 setOtpError(true);
                 _sonnerNative.toast.error('Invalid OTP. Please try again.');
             }
+        } catch (err) {
+            console.error("PatientDetails OTP error:", err);
+            setOtpError(true);
+            _sonnerNative.toast.error('Error verifying OTP');
+        } finally {
             setLoading(false);
-        }, 800);
+        }
     };
 
     var handleResendOtp = function handleResendOtp() {

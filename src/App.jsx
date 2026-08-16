@@ -221,7 +221,8 @@ function AppContent() {
     })();
     loadData();
     
-var _firebase = require("./services/firebase");
+    var _firebase = require("./services/firebase");
+    var _userService = require("./services/userService");
 
     // Subscribe to real-time events on Firestore 'tokens' collection using onSnapshot
     var tokensCollection = (0, _firebase.collection)(_firebase.db, 'tokens');
@@ -242,15 +243,17 @@ var _firebase = require("./services/firebase");
                 primaryDepartment: data.primaryDepartment || data.department || 'General',
                 status: data.status === 'completed' ? 'completed' : 'active',
                 timestamp: createdAtDate,
+                scheduledTime: data.scheduledTime ? new Date(data.scheduledTime) : undefined,
                 validUntil: data.validUntil ? new Date(data.validUntil) : new Date(createdAtDate.getTime() + 24 * 3600000),
+                createdAt: createdAtDate,
                 departmentAccess: data.departmentAccess || allDepartments,
-                patient: data.patient || {
-                    name: data.patient_name || 'Patient',
-                    email: '',
-                    phone: '',
-                    age: 0,
-                    gender: 'not specified',
-                    patientId: `PAT-${Date.now()}`
+                patient: {
+                    name: (data.patient && data.patient.name) || data.patient_name || '',
+                    email: (data.patient && data.patient.email) || data.patient_email || '',
+                    phone: (data.patient && data.patient.phone) || data.patient_phone || '',
+                    age: (data.patient && data.patient.age) || data.age || 0,
+                    gender: (data.patient && data.patient.gender) || data.gender || 'not specified',
+                    patientId: (data.patient && data.patient.patientId) || data.patient_id || `PAT-${Date.now()}`
                 },
                 visits: data.visits || [],
                 prescriptions: data.prescriptions || [],
@@ -258,15 +261,10 @@ var _firebase = require("./services/firebase");
             }));
         });
 
-        if (fetchedTokens.length > 0) {
-            setState(function(prev) {
-                var updatedMap = new Map();
-                prev.tokens.forEach(function(t) { updatedMap.set(t.id, t); });
-                fetchedTokens.forEach(function(t) { updatedMap.set(t.id, Object.assign({}, updatedMap.get(t.id) || {}, t)); });
-                
-                return Object.assign({}, prev, { tokens: Array.from(updatedMap.values()) });
-            });
-        }
+        // Authoritative Firestore state replaces local tokens array across all connected devices
+        setState(function(prev) {
+            return Object.assign({}, prev, { tokens: fetchedTokens });
+        });
     }, function(error) {
         console.error("Firestore onSnapshot error:", error);
     });
@@ -276,27 +274,28 @@ var _firebase = require("./services/firebase");
     };
   }, []);
 
-  // Sync patient info from authenticated user
+  // Sync patient info from authenticated user or storage
   (0, _react.useEffect)(
     function () {
       var syncInfo = /*#__PURE__*/ (function () {
         var _ref2 = (0, _asyncToGenerator2.default)(function* () {
           if (user && !authLoading) {
             var _user$user_metadata, _user$email, _user$user_metadata2;
+            var userPhone = user.phoneNumber || ((_user$user_metadata2 = user.user_metadata) == null ? void 0 : _user$user_metadata2.phone) || "";
+            var userName = ((_user$user_metadata = user.user_metadata) == null ? void 0 : _user$user_metadata.name) || "";
+            
+            if (userPhone) {
+              var _userService2 = require("./services/userService");
+              var userRecord = yield _userService2.getOrCreateUserByPhone(userPhone, user.uid);
+              userName = userRecord.name || userName;
+              userPhone = userRecord.phone || userPhone;
+            }
+
             var patientInfo = {
-              name:
-                ((_user$user_metadata = user.user_metadata) == null
-                  ? void 0
-                  : _user$user_metadata.name) ||
-                ((_user$email = user.email) == null
-                  ? void 0
-                  : _user$email.split("@")[0]) ||
-                "Patient",
+              name: userName && userName !== 'Patient' ? userName : '',
               email: user.email || "",
-              phone:
-                ((_user$user_metadata2 = user.user_metadata) == null
-                  ? void 0
-                  : _user$user_metadata2.phone) || "",
+              phone: userPhone,
+              uid: user.uid
             };
 
             yield _asyncStorage.default.setItem(
@@ -309,7 +308,21 @@ var _firebase = require("./services/firebase");
               });
             });
           } else if (!user && !authLoading) {
-            yield _asyncStorage.default.removeItem("current-patient-info");
+            // Check if patient info is stored locally from phone OTP session
+            var savedInfo = yield _asyncStorage.default.getItem("current-patient-info");
+            if (savedInfo) {
+              try {
+                var parsed = JSON.parse(savedInfo);
+                if (parsed && (parsed.phone || parsed.name)) {
+                  setState(function (prev) {
+                    return Object.assign({}, prev, {
+                      patientInfo: parsed,
+                    });
+                  });
+                  return;
+                }
+              } catch(e) {}
+            }
             setState(function (prev) {
               return Object.assign({}, prev, {
                 patientInfo: null,
@@ -719,20 +732,12 @@ var _firebase = require("./services/firebase");
           // After successful auth, set patient info from user and go to dashboard
           if (user) {
             var _user$user_metadata3, _user$email2, _user$user_metadata4;
+            var rawName = ((_user$user_metadata3 = user.user_metadata) == null ? void 0 : _user$user_metadata3.name) || "";
             var patientInfo = {
-              name:
-                ((_user$user_metadata3 = user.user_metadata) == null
-                  ? void 0
-                  : _user$user_metadata3.name) ||
-                ((_user$email2 = user.email) == null
-                  ? void 0
-                  : _user$email2.split("@")[0]) ||
-                "Patient",
+              name: rawName && rawName !== 'Patient' ? rawName : '',
               email: user.email || "",
-              phone:
-                ((_user$user_metadata4 = user.user_metadata) == null
-                  ? void 0
-                  : _user$user_metadata4.phone) || "",
+              phone: user.phoneNumber || ((_user$user_metadata4 = user.user_metadata) == null ? void 0 : _user$user_metadata4.phone) || "",
+              uid: user.uid
             };
             setState(function (prev) {
               return Object.assign({}, prev, {

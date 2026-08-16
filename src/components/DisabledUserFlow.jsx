@@ -144,10 +144,26 @@ function DisabledUserFlow() {
                 return;
             }
             
-var _firebase = require("../services/firebase");
+            var _firebase = require("../services/firebase");
+            var userService = require("../services/userService");
+            var asyncStorage = require("@react-native-async-storage/async-storage").default;
 
             try {
+                var patientName = formData.name ? formData.name.trim() : (state.patientInfo ? state.patientInfo.name : '');
+                
+                // Save name to existing Firestore user record if entered
+                if (patientName && state.patientInfo) {
+                    yield userService.saveUserNameToUserRecord(state.patientInfo.uid, state.patientInfo.phone, patientName);
+                    var updatedPatientInfo = Object.assign({}, state.patientInfo, { name: patientName });
+                    try {
+                        yield asyncStorage.setItem('current-patient-info', JSON.stringify(updatedPatientInfo));
+                    } catch (e) {}
+                }
+
                 var newToken = generateDisabledToken();
+                if (patientName) {
+                    newToken.patient.name = patientName;
+                }
                 
                 // Firestore atomic transaction to prevent race conditions and duplicate positions
                 yield (0, _firebase.runTransaction)(_firebase.db, /*#__PURE__*/function () {
@@ -185,7 +201,8 @@ var _firebase = require("../services/firebase");
                 setState(function (prev) {
                     return Object.assign({},
                         prev, {
-                        tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens), [newToken]),
+                        tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens.filter(function(t) { return t.id !== newToken.id; })), [newToken]),
+                        patientInfo: patientName ? Object.assign({}, prev.patientInfo, { name: patientName }) : prev.patientInfo,
                         currentToken: newToken,
                         currentView: 'token'
                     });

@@ -8,6 +8,8 @@ import { toast } from 'sonner-native';
 import { useAppContext } from '../context/AppContext';
 import { auth, db, doc, setDoc, getDoc, signInWithPhoneNumber, RecaptchaVerifier } from '../services/firebase';
 import { OTPInput } from '../components/OTPInput';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getOrCreateUserByPhone } from '../services/userService';
 
 export function OTPVerificationScreen() {
     const { state, setState } = useAppContext();
@@ -58,41 +60,43 @@ export function OTPVerificationScreen() {
         setOtpError(false);
 
         try {
-            let userId = `user_${Date.now()}`;
+            let authUid = null;
 
             // 1. Verify OTP with Firebase Auth confirmation result if available
             if (confirmationResult && typeof confirmationResult.confirm === 'function') {
-                const userCredential = await confirmationResult.confirm(otpValue);
-                if (userCredential && userCredential.user) {
-                    userId = userCredential.user.uid;
+                try {
+                    const userCredential = await confirmationResult.confirm(otpValue);
+                    if (userCredential && userCredential.user) {
+                        authUid = userCredential.user.uid;
+                    }
+                } catch (confirmErr) {
+                    console.warn("Firebase confirmationResult error:", confirmErr);
+                    // If auth fails in strict mode, throw so user knows OTP was invalid
+                    throw confirmErr;
                 }
             }
 
-            // 2. Save/Update patient in Firestore `users` collection
+            // 2. Lookup existing user record by phone number or create exactly one if new
+            const userRecord = await getOrCreateUserByPhone(phone, authUid);
+
+            const patientInfo = {
+                name: userRecord.name || '',
+                email: userRecord.email || '',
+                phone: userRecord.phone || phone,
+                uid: userRecord.uid
+            };
+
+            // Save patient info to local storage for persistence
             try {
-                const userDocRef = doc(db, 'users', userId);
-                const userSnap = await getDoc(userDocRef);
-                if (!userSnap.exists()) {
-                    await setDoc(userDocRef, {
-                        uid: userId,
-                        phone_number: phone,
-                        name: 'Patient',
-                        createdAt: new Date().toISOString()
-                    });
-                }
-            } catch (fsErr) {
-                console.error("Firestore user creation warning:", fsErr);
+                await AsyncStorage.setItem('current-patient-info', JSON.stringify(patientInfo));
+            } catch (storageErr) {
+                console.warn('AsyncStorage error saving patient info:', storageErr);
             }
 
             // 3. Update app context with patient info
             setState(prev => ({
                 ...prev,
-                patientInfo: {
-                    name: 'Patient',
-                    email: '',
-                    phone: phone,
-                    uid: userId
-                },
+                patientInfo: patientInfo,
                 currentView: 'patient-dashboard'
             }));
 

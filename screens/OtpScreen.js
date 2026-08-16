@@ -23,17 +23,10 @@ export default function OtpScreen({ route, navigation }) {
         }
       }
 
-      // Sync user to Firestore
+      // Sync/reuse user to Firestore
       try {
-        const userRef = doc(db, 'users', userId);
-        const snap = await getDoc(userRef);
-        if (!snap.exists()) {
-          await setDoc(userRef, {
-            uid: userId,
-            phone_number: phoneNumber || '',
-            createdAt: new Date().toISOString()
-          });
-        }
+        const { getOrCreateUserByPhone } = require('../src/services/userService');
+        await getOrCreateUserByPhone(phoneNumber, userId);
       } catch (e) {
         console.error('Firestore user sync warning:', e);
       }

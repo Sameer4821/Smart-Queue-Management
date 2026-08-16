@@ -47,24 +47,38 @@ export const AuthProvider = ({ children }) => {
           setSession({ user: firebaseUser });
           
           try {
-            const userDocRef = doc(db, 'users', firebaseUser.uid);
-            const userSnap = await getDoc(userDocRef);
-            if (userSnap.exists()) {
-              setUserMetadata(userSnap.data());
+            if (firebaseUser.phoneNumber) {
+              const { getOrCreateUserByPhone } = require('../services/userService');
+              const userRec = await getOrCreateUserByPhone(firebaseUser.phoneNumber, firebaseUser.uid);
+              setUserMetadata({
+                uid: userRec.uid,
+                name: userRec.name || '',
+                phone: userRec.phone || firebaseUser.phoneNumber,
+                email: userRec.email || firebaseUser.email || ''
+              });
             } else {
-              const meta = {
-                name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Patient',
-                email: firebaseUser.email || '',
-                phone: firebaseUser.phoneNumber || '',
-                createdAt: new Date().toISOString()
-              };
-              setUserMetadata(meta);
+              const userDocRef = doc(db, 'users', firebaseUser.uid);
+              const userSnap = await getDoc(userDocRef);
+              if (userSnap.exists()) {
+                setUserMetadata(userSnap.data());
+              } else {
+                const meta = {
+                  uid: firebaseUser.uid,
+                  name: firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : ''),
+                  email: firebaseUser.email || '',
+                  phone: firebaseUser.phoneNumber || '',
+                  createdAt: new Date().toISOString()
+                };
+                setUserMetadata(meta);
+              }
             }
           } catch (e) {
             console.error('Error fetching user metadata from Firestore:', e);
             setUserMetadata({
-              name: firebaseUser.displayName || 'Patient',
-              phone: firebaseUser.phoneNumber || ''
+              uid: firebaseUser.uid,
+              name: firebaseUser.displayName || '',
+              phone: firebaseUser.phoneNumber || '',
+              email: firebaseUser.email || ''
             });
           }
         } else {

@@ -7,6 +7,8 @@ import { Phone, ArrowLeft, User } from 'lucide-react-native';
 import { toast } from 'sonner-native';
 import { useAppContext } from '../context/AppContext';
 import { auth, signInWithPhoneNumber, RecaptchaVerifier } from '../services/firebase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getOrCreateUserByPhone } from '../services/userService';
 
 export function PatientRegistrationScreen() {
     const { setState } = useAppContext();
@@ -134,14 +136,21 @@ export function PatientRegistrationScreen() {
                             </Button>
 
                             <Button 
-                                onPress={() => {
+                                onPress={async () => {
+                                    const testPhone = '+919999999999';
+                                    const userRecord = await getOrCreateUserByPhone(testPhone, 'user_dev_test');
+                                    const patientInfo = {
+                                        name: userRecord.name || '',
+                                        email: userRecord.email || '',
+                                        phone: userRecord.phone || testPhone,
+                                        uid: userRecord.uid
+                                    };
+                                    try {
+                                        await AsyncStorage.setItem('current-patient-info', JSON.stringify(patientInfo));
+                                    } catch (e) {}
                                     setState(prev => ({
                                         ...prev,
-                                        patientInfo: {
-                                            name: 'Test Patient',
-                                            email: '',
-                                            phone: '+919999999999'
-                                        },
+                                        patientInfo: patientInfo,
                                         currentView: 'patient-dashboard'
                                     }));
                                 }}

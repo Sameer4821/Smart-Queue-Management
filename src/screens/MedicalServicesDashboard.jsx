@@ -13,7 +13,7 @@ var _badge = require("../components/ui/badge");
 
 var _lucideReactNative = require("lucide-react-native");
 var _asyncStorage = _interopRequireDefault(require("@react-native-async-storage/async-storage")); 
-var _jsxRuntime = require("react/jsx-runtime"); function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }// import { Progress } from './ui/progress';
+var _jsxRuntime = require("react/jsx-runtime");
 
 
 
@@ -178,9 +178,9 @@ function PatientDashboard() {
                                         (0, _jsxRuntime.jsx)(_reactNative.View, { style: [styles.userIconWrap, isMobile && styles.userIconWrapMobile], children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_lucideReactNative.User, { size: isMobile ? 20 : 24, color: "#2563eb" }) }),/*#__PURE__*/
                                         (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                             style: [{ flex: 1, minWidth: 0 }, isMobile && { marginRight: 0 }], children: [/*#__PURE__*/
-                                                (0, _jsxRuntime.jsxs)(_reactNative.Text, { style: [styles.welcomeTitle, isMobile && styles.welcomeTitleMobile], numberOfLines: 2, children: [t.pdWelcomeBack, ", ", state.patientInfo.name] }),/*#__PURE__*/
-                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: [styles.welcomeSub, isMobile && styles.welcomeSubMobile], numberOfLines: 1, children: state.patientInfo.email }),/*#__PURE__*/
-                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: [styles.welcomeSub, isMobile && styles.welcomeSubMobile], numberOfLines: 1, children: state.patientInfo.phone })]
+                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: [styles.welcomeTitle, isMobile && styles.welcomeTitleMobile], numberOfLines: 2, children: state.patientInfo.name ? `${t.pdWelcomeBack}, ${state.patientInfo.name}` : t.pdWelcomeBack }),/*#__PURE__*/
+                                                state.patientInfo.email ? (0, _jsxRuntime.jsx)(_reactNative.Text, { style: [styles.welcomeSub, isMobile && styles.welcomeSubMobile], numberOfLines: 1, children: state.patientInfo.email }) : null,/*#__PURE__*/
+                                                state.patientInfo.phone ? (0, _jsxRuntime.jsx)(_reactNative.Text, { style: [styles.welcomeSub, isMobile && styles.welcomeSubMobile], numberOfLines: 1, children: state.patientInfo.phone }) : null]
                                         }
                                         ),/*#__PURE__*/
                                         !isNarrow && (0, _jsxRuntime.jsx)(_badge.Badge, { variant: "secondary", children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, { children: t.pdLoggedInAs }) })]

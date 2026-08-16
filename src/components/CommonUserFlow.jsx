@@ -10,7 +10,7 @@ var _label = require("./ui/label");
 var _select = require("./ui/select");
 
 var _badge = require("./ui/badge");
-var _lucideReactNative = require("lucide-react-native"); var _jsxRuntime = require("react/jsx-runtime"); function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }
+var _lucideReactNative = require("lucide-react-native"); var _jsxRuntime = require("react/jsx-runtime");
 // Firebase real-time integration active
 
 var manualTimeSlots = [
@@ -142,7 +142,24 @@ var _firebase = require("../services/firebase");
                 return;
             }
             try {
+                var userService = require("../services/userService");
+                var asyncStorage = require("@react-native-async-storage/async-storage").default;
+                
+                var patientName = formData.name ? formData.name.trim() : (state.patientInfo ? state.patientInfo.name : '');
+                
+                // Save name to existing Firestore user record if entered
+                if (patientName && state.patientInfo) {
+                    yield userService.saveUserNameToUserRecord(state.patientInfo.uid, state.patientInfo.phone, patientName);
+                    var updatedPatientInfo = Object.assign({}, state.patientInfo, { name: patientName });
+                    try {
+                        yield asyncStorage.setItem('current-patient-info', JSON.stringify(updatedPatientInfo));
+                    } catch (e) {}
+                }
+
                 var newToken = generateToken();
+                if (patientName) {
+                    newToken.patient.name = patientName;
+                }
                 
                 // Firestore atomic transaction to prevent race conditions and duplicate positions
                 yield (0, _firebase.runTransaction)(_firebase.db, /*#__PURE__*/function () {
@@ -182,7 +199,8 @@ var _firebase = require("../services/firebase");
                 setState(function (prev) {
                     return Object.assign({},
                         prev, {
-                        tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens), [newToken]),
+                        tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens.filter(function(t) { return t.id !== newToken.id; })), [newToken]),
+                        patientInfo: patientName ? Object.assign({}, prev.patientInfo, { name: patientName }) : prev.patientInfo,
                         currentToken: newToken,
                         currentView: 'token'
                     });
