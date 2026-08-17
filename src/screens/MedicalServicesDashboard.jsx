@@ -218,18 +218,21 @@ function PatientDashboard() {
                                         (0, _jsxRuntime.jsx)(_card.Card, {
                                             style: [styles.cardItem, isMobile && styles.cardItemMobile, { borderLeftWidth: 4, borderLeftColor: '#3b82f6' }], children:/*#__PURE__*/
                                                 (0, _jsxRuntime.jsxs)(_card.CardHeader, {
-                                                    style: [styles.itemHeader, isMobile && styles.itemHeaderMobile], children: [/*#__PURE__*/
-                                                        (0, _jsxRuntime.jsx)(_reactNative.View, { style: [styles.iconBox, isMobile && styles.iconBoxMobile, { backgroundColor: '#dbeafe' }], children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_lucideReactNative.Users, { size: isMobile ? 24 : 32, color: "#2563eb" }) }),/*#__PURE__*/
+                                                    style: [styles.itemHeader, isMobile && { flexDirection: 'column', alignItems: 'stretch' }], children: [/*#__PURE__*/
                                                         (0, _jsxRuntime.jsxs)(_reactNative.View, {
-                                                            style: [{ flex: 1, marginLeft: 16 }, isMobile && styles.textBlockMobile], children: [/*#__PURE__*/
-                                                                (0, _jsxRuntime.jsx)(_card.CardTitle, { style: [{ color: '#2563eb' }, isMobile && { flexWrap: 'wrap' }], children: t.pdCommon }),/*#__PURE__*/
-                                                                (0, _jsxRuntime.jsx)(_card.CardDescription, { style: [isMobile && { flexWrap: 'wrap' }], children: t.pdCommonDesc })]
-                                                        }
-                                                        ),/*#__PURE__*/
+                                                            style: { flexDirection: 'row', alignItems: 'center', width: '100%', marginBottom: isMobile ? 12 : 0 }, children: [
+                                                                (0, _jsxRuntime.jsx)(_reactNative.View, { style: [styles.iconBox, isMobile && styles.iconBoxMobile, { backgroundColor: '#dbeafe' }], children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_lucideReactNative.Users, { size: isMobile ? 24 : 32, color: "#2563eb" }) }),/*#__PURE__*/
+                                                                (0, _jsxRuntime.jsxs)(_reactNative.View, {
+                                                                    style: { flex: 1, marginLeft: 16 }, children: [/*#__PURE__*/
+                                                                        (0, _jsxRuntime.jsx)(_card.CardTitle, { style: [{ color: '#2563eb' }, isMobile && { flexWrap: 'wrap' }], children: t.pdCommon }),/*#__PURE__*/
+                                                                        (0, _jsxRuntime.jsx)(_card.CardDescription, { style: [isMobile && { flexWrap: 'wrap', flexShrink: 1 }], children: t.pdCommonDesc })]
+                                                                })
+                                                            ]
+                                                        }),/*#__PURE__*/
                                                         (0, _jsxRuntime.jsxs)(_reactNative.View, {
-                                                            style: [{ alignItems: 'flex-end' }, isMobile && styles.cardActionsMobile], children: [/*#__PURE__*/
+                                                            style: [{ alignItems: 'flex-end' }, isMobile && { width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTopWidth: 1, borderTopColor: '#e2e8f0' }], children: [/*#__PURE__*/
                                                                 (0, _jsxRuntime.jsx)(_badge.Badge, { variant: "outline", children:/*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, { children: ["Queue: ", state.tokens.filter(function (tok) { return tok.type === 'common' && tok.status === 'active'; }).length] }) }),/*#__PURE__*/
-                                                                (0, _jsxRuntime.jsx)(_button.Button, { size: isMobile ? 'sm' : 'default', style: [{ marginTop: 8 }, isMobile && styles.bookBtnMobile], onPress: function onPress() { return handleCategorySelect('common'); }, children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff', fontSize: isMobile ? 13 : 16 }, children: t.pdSelect }) })]
+                                                                (0, _jsxRuntime.jsx)(_button.Button, { size: isMobile ? 'sm' : 'default', style: [{ marginTop: 8 }, isMobile && { marginTop: 0 }], onPress: function onPress() { return handleCategorySelect('common'); }, children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff', fontSize: isMobile ? 13 : 16 }, children: t.pdSelect }) })]
                                                         }
                                                         )]
                                                 }
@@ -244,19 +247,22 @@ function PatientDashboard() {
                                         (0, _jsxRuntime.jsx)(_card.Card, {
                                             style: [styles.cardItem, isMobile && styles.cardItemMobile, { borderLeftWidth: 4, borderLeftColor: '#ef4444', opacity: remainingEmergency > 0 ? 1 : 0.6 }], children:/*#__PURE__*/
                                                 (0, _jsxRuntime.jsxs)(_card.CardHeader, {
-                                                    style: [styles.itemHeader, isMobile && styles.itemHeaderMobile], children: [/*#__PURE__*/
-                                                        (0, _jsxRuntime.jsx)(_reactNative.View, { style: [styles.iconBox, isMobile && styles.iconBoxMobile, { backgroundColor: '#fee2e2' }], children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_lucideReactNative.AlertTriangle, { size: isMobile ? 24 : 32, color: "#dc2626" }) }),/*#__PURE__*/
+                                                    style: [styles.itemHeader, isMobile && { flexDirection: 'column', alignItems: 'stretch' }], children: [/*#__PURE__*/
                                                         (0, _jsxRuntime.jsxs)(_reactNative.View, {
-                                                            style: [{ flex: 1, marginLeft: 16 }, isMobile && styles.textBlockMobile], children: [/*#__PURE__*/
-                                                                (0, _jsxRuntime.jsx)(_card.CardTitle, { style: [{ color: '#dc2626' }, isMobile && { flexWrap: 'wrap' }], children: t.pdEmergency }),/*#__PURE__*/
-                                                                (0, _jsxRuntime.jsx)(_card.CardDescription, { style: [isMobile && { flexWrap: 'wrap' }], children: t.pdEmergencyDesc })]
-                                                        }
-                                                        ),/*#__PURE__*/
+                                                            style: { flexDirection: 'row', alignItems: 'center', width: '100%', marginBottom: isMobile ? 12 : 0 }, children: [
+                                                                (0, _jsxRuntime.jsx)(_reactNative.View, { style: [styles.iconBox, isMobile && styles.iconBoxMobile, { backgroundColor: '#fee2e2' }], children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_lucideReactNative.AlertTriangle, { size: isMobile ? 24 : 32, color: "#dc2626" }) }),/*#__PURE__*/
+                                                                (0, _jsxRuntime.jsxs)(_reactNative.View, {
+                                                                    style: { flex: 1, marginLeft: 16 }, children: [/*#__PURE__*/
+                                                                        (0, _jsxRuntime.jsx)(_card.CardTitle, { style: [{ color: '#dc2626' }, isMobile && { flexWrap: 'wrap' }], children: t.pdEmergency }),/*#__PURE__*/
+                                                                        (0, _jsxRuntime.jsx)(_card.CardDescription, { style: [isMobile && { flexWrap: 'wrap', flexShrink: 1 }], children: t.pdEmergencyDesc })]
+                                                                })
+                                                            ]
+                                                        }),/*#__PURE__*/
                                                         (0, _jsxRuntime.jsxs)(_reactNative.View, {
-                                                            style: [{ alignItems: 'flex-end' }, isMobile && styles.cardActionsMobile], children: [/*#__PURE__*/
+                                                            style: [{ alignItems: 'flex-end' }, isMobile && { width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTopWidth: 1, borderTopColor: '#e2e8f0' }], children: [/*#__PURE__*/
                                                                 (0, _jsxRuntime.jsx)(_badge.Badge, { variant: "destructive", children:/*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, { style: { color: '#fff' }, children: ["Queue: ", state.tokens.filter(function (tok) { return tok.type === 'emergency' && tok.status === 'active'; }).length] }) }),/*#__PURE__*/
                                                                 (0, _jsxRuntime.jsx)(_button.Button, {
-                                                                    variant: "destructive", disabled: remainingEmergency <= 0, size: isMobile ? 'sm' : 'default', style: [{ marginTop: 8 }, isMobile && styles.bookBtnMobile], children:/*#__PURE__*/
+                                                                    variant: "destructive", disabled: remainingEmergency <= 0, size: isMobile ? 'sm' : 'default', style: [{ marginTop: 8 }, isMobile && { marginTop: 0 }], children:/*#__PURE__*/
                                                                         (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff', fontSize: isMobile ? 13 : 16 }, children: remainingEmergency <= 0 ? t.pdLimitReached : t.pdSelect })
                                                                 }
                                                                 )]
@@ -274,18 +280,21 @@ function PatientDashboard() {
                                         (0, _jsxRuntime.jsx)(_card.Card, {
                                             style: [styles.cardItem, isMobile && styles.cardItemMobile, { borderLeftWidth: 4, borderLeftColor: '#3b82f6' }], children:/*#__PURE__*/
                                                 (0, _jsxRuntime.jsxs)(_card.CardHeader, {
-                                                    style: [styles.itemHeader, isMobile && styles.itemHeaderMobile], children: [/*#__PURE__*/
-                                                        (0, _jsxRuntime.jsx)(_reactNative.View, { style: [styles.iconBox, isMobile && styles.iconBoxMobile, { backgroundColor: '#dbeafe' }], children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_lucideReactNative.Accessibility, { size: isMobile ? 24 : 32, color: "#2563eb" }) }),/*#__PURE__*/
+                                                    style: [styles.itemHeader, isMobile && { flexDirection: 'column', alignItems: 'stretch' }], children: [/*#__PURE__*/
                                                         (0, _jsxRuntime.jsxs)(_reactNative.View, {
-                                                            style: [{ flex: 1, marginLeft: 16 }, isMobile && styles.textBlockMobile], children: [/*#__PURE__*/
-                                                                (0, _jsxRuntime.jsx)(_card.CardTitle, { style: [{ color: '#2563eb' }, isMobile && { flexWrap: 'wrap' }], children: t.pdDisabled }),/*#__PURE__*/
-                                                                (0, _jsxRuntime.jsx)(_card.CardDescription, { style: [isMobile && { flexWrap: 'wrap' }], children: t.pdDisabledDesc })]
-                                                        }
-                                                        ),/*#__PURE__*/
+                                                            style: { flexDirection: 'row', alignItems: 'center', width: '100%', marginBottom: isMobile ? 12 : 0 }, children: [
+                                                                (0, _jsxRuntime.jsx)(_reactNative.View, { style: [styles.iconBox, isMobile && styles.iconBoxMobile, { backgroundColor: '#dbeafe' }], children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_lucideReactNative.Accessibility, { size: isMobile ? 24 : 32, color: "#2563eb" }) }),/*#__PURE__*/
+                                                                (0, _jsxRuntime.jsxs)(_reactNative.View, {
+                                                                    style: { flex: 1, marginLeft: 16 }, children: [/*#__PURE__*/
+                                                                        (0, _jsxRuntime.jsx)(_card.CardTitle, { style: [{ color: '#2563eb' }, isMobile && { flexWrap: 'wrap' }], children: t.pdDisabled }),/*#__PURE__*/
+                                                                        (0, _jsxRuntime.jsx)(_card.CardDescription, { style: [isMobile && { flexWrap: 'wrap', flexShrink: 1 }], children: t.pdDisabledDesc })]
+                                                                })
+                                                            ]
+                                                        }),/*#__PURE__*/
                                                         (0, _jsxRuntime.jsxs)(_reactNative.View, {
-                                                            style: [{ alignItems: 'flex-end' }, isMobile && styles.cardActionsMobile], children: [/*#__PURE__*/
+                                                            style: [{ alignItems: 'flex-end' }, isMobile && { width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTopWidth: 1, borderTopColor: '#e2e8f0' }], children: [/*#__PURE__*/
                                                                 (0, _jsxRuntime.jsx)(_badge.Badge, { variant: "secondary", children:/*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, { children: ["Queue: ", state.tokens.filter(function (tok) { return tok.type === 'disabled' && tok.status === 'active'; }).length] }) }),/*#__PURE__*/
-                                                                (0, _jsxRuntime.jsx)(_button.Button, { size: isMobile ? 'sm' : 'default', style: [{ marginTop: 8 }, isMobile && styles.bookBtnMobile], onPress: function onPress() { return handleCategorySelect('disabled'); }, children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff', fontSize: isMobile ? 13 : 16 }, children: t.pdSelect }) })]
+                                                                (0, _jsxRuntime.jsx)(_button.Button, { size: isMobile ? 'sm' : 'default', style: [{ marginTop: 8 }, isMobile && { marginTop: 0 }], onPress: function onPress() { return handleCategorySelect('disabled'); }, children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff', fontSize: isMobile ? 13 : 16 }, children: t.pdSelect }) })]
                                                         }
                                                         )]
                                                 }
