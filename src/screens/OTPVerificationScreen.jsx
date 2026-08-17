@@ -95,11 +95,11 @@ export function OTPVerificationScreen() {
             setState(prev => ({
                 ...prev,
                 patientInfo: {
-                    name: 'Patient', // Placeholder, can be asked later
-                    email: '',
+                    name: existingPatient?.full_name || 'Patient', // Placeholder, can be asked later
+                    email: existingPatient?.email || '',
                     phone: phone
                 },
-                currentView: 'patient-dashboard'
+                currentView: existingPatient?.full_name ? 'patient-dashboard' : 'patient-personal-info-setup'
             }));
 
             toast.success(t('otpVerified'));

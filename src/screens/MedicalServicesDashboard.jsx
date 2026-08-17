@@ -4,13 +4,14 @@ var _useTranslation = require("../hooks/useTranslation");
 var _Settings = require("../components/Settings");
 var _DepartmentStatistics = require("../components/DepartmentStatistics");
 var _PatientHistory = require("../components/PatientHistory");
+var _PatientPersonalInfoSetup = require("./PatientPersonalInfoSetup");
 
 var _button = require("../components/ui/button");
 var _card = require("../components/ui/card");
 var _badge = require("../components/ui/badge");
 
 var _lucideReactNative = require("lucide-react-native");
-var _asyncStorage = _interopRequireDefault(require("@react-native-async-storage/async-storage")); 
+var _asyncStorage = _interopRequireDefault(require("@react-native-async-storage/async-storage"));
 var _supabaseClient = require("../services/supabaseClient");
 var _jsxRuntime = require("react/jsx-runtime"); function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }// import { Progress } from './ui/progress';
 
@@ -30,15 +31,15 @@ function PatientDashboard() {
     var _useState7 = (0, _react.useState)(null), _useState8 = (0, _slicedToArray2.default)(_useState7, 2), latestPrescription = _useState8[0], setLatestPrescription = _useState8[1];
     var pulseAnim = (0, _react.useRef)(new _reactNative.Animated.Value(0)).current;
 
-    (0, _react.useEffect)(function() {
+    (0, _react.useEffect)(function () {
         if (!state.patientInfo) return;
         var patientId = state.patientInfo.phone || state.patientInfo.email;
         if (!patientId) return;
 
-        var activeToken = state.tokens.find(function(t) { return t.patient.email === state.patientInfo.email && t.status === 'active'; });
+        var activeToken = state.tokens.find(function (t) { return t.patient.email === state.patientInfo.email && t.status === 'active'; });
         if (!activeToken) return;
 
-        var setPrescriptionFromPayload = function(payload) {
+        var setPrescriptionFromPayload = function (payload) {
             if (payload.new && payload.new.token_id === activeToken.id) {
                 setLatestPrescription(payload.new);
             }
@@ -48,12 +49,12 @@ function PatientDashboard() {
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'prescriptions', filter: 'patient_id=eq.' + patientId }, setPrescriptionFromPayload)
             .subscribe();
 
-        return function() {
+        return function () {
             _supabaseClient.supabase.removeChannel(channel);
         };
     }, [state.patientInfo, state.tokens]);
 
-    (0, _react.useEffect)(function() {
+    (0, _react.useEffect)(function () {
         if (latestPrescription) {
             _reactNative.Animated.loop(
                 _reactNative.Animated.sequence([
@@ -102,6 +103,11 @@ function PatientDashboard() {
     if (showSettings) return/*#__PURE__*/(0, _jsxRuntime.jsx)(_Settings.Settings, { onClose: function onClose() { return setShowSettings(false); } });
     if (showDepartmentStats) return/*#__PURE__*/(0, _jsxRuntime.jsx)(_DepartmentStatistics.DepartmentStatistics, { onBack: function onBack() { return setShowDepartmentStats(false); } });
     if (showPatientHistory) return/*#__PURE__*/(0, _jsxRuntime.jsx)(_PatientHistory.PatientHistory, { onBack: function onBack() { return setShowPatientHistory(false); } });
+
+    // Show setup screen if patient name is missing or defaulting to 'Patient'
+    if (state.patientInfo.name === 'Patient' || !state.patientInfo.name) {
+        return /*#__PURE__*/(0, _jsxRuntime.jsx)(_PatientPersonalInfoSetup.PatientPersonalInfoSetup, {});
+    }
 
     var patientTokens = state.tokens.filter(function (tok) { var _state$patientInfo; return tok.patient.email === ((_state$patientInfo = state.patientInfo) == null ? void 0 : _state$patientInfo.email); });
     var totalVisits = patientTokens.flatMap(function (token) { return token.visits || []; }).length;
@@ -178,10 +184,10 @@ function PatientDashboard() {
                                         !isNarrow && (0, _jsxRuntime.jsx)(_badge.Badge, { variant: "secondary", children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, { children: t.pdLoggedInAs }) })]
                                 }
                                 ),/*#__PURE__*/
-                                (0, _jsxRuntime.jsx)(_reactNative.Animated.View, { 
-                                    style: { 
-                                        marginTop: 12, 
-                                        opacity: latestPrescription ? _reactNative.Animated.add(0.5, _reactNative.Animated.multiply(pulseAnim, 0.5)) : 0.5 
+                                (0, _jsxRuntime.jsx)(_reactNative.Animated.View, {
+                                    style: {
+                                        marginTop: 12,
+                                        opacity: latestPrescription ? _reactNative.Animated.add(0.5, _reactNative.Animated.multiply(pulseAnim, 0.5)) : 0.5
                                     }, children:/*#__PURE__*/
                                         (0, _jsxRuntime.jsxs)(_reactNative.TouchableOpacity, {
                                             disabled: !latestPrescription,
@@ -200,7 +206,7 @@ function PatientDashboard() {
                 (0, _jsxRuntime.jsxs)(_card.Card, {
                     style: [styles.card, isMobile && styles.cardMobile, isMobile && { backgroundColor: 'transparent', borderWidth: 0, shadowOpacity: 0, elevation: 0 }], children: [/*#__PURE__*/
                         (0, _jsxRuntime.jsx)(_card.CardHeader, {
-                            style: [ { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }, isMobile && { paddingHorizontal: 4, paddingBottom: 16 } ], children:/*#__PURE__*/
+                            style: [{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }, isMobile && { paddingHorizontal: 4, paddingBottom: 16 }], children:/*#__PURE__*/
                                 (0, _jsxRuntime.jsx)(_card.CardTitle, { style: isMobile && { fontSize: 20, color: '#0f172a' }, children: t.pdSelectCategory })
                         }
                         ),/*#__PURE__*/
