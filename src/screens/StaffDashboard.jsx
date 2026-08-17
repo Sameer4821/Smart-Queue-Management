@@ -37,6 +37,7 @@ import {
   Plus
 } from "lucide-react-native";
 import { Card } from "../components/ui/card";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../components/ui/select";
 import { toast } from "sonner-native";
 import { supabase } from "../services/supabaseClient";
 
@@ -263,10 +264,10 @@ export function StaffDashboard() {
   };
 
 
-  const toggleLanguage = () => {
+  const handleLanguageChange = (language) => {
     setAppState((prev) => ({
       ...prev,
-      language: prev.language === "en" ? "hi" : "en",
+      language: language,
     }));
   };
 
@@ -466,10 +467,22 @@ export function StaffDashboard() {
             </Text>
           </View>
           <View style={styles.headerActions}>
-            <TouchableOpacity onPress={toggleLanguage} style={styles.iconBtn}>
-              <Globe size={22} color="#1e293b" />
-              <Text style={styles.langText}>{appState.language.toUpperCase()}</Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0' }}>
+              <Globe size={20} color="#1e293b" style={{ marginRight: 8 }} />
+              <Select value={appState.language} onValueChange={handleLanguageChange}>
+                <SelectTrigger style={{ width: 110, borderWidth: 0, paddingHorizontal: 0 }}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="en">English</SelectItem>
+                  <SelectItem value="hi">हिंदी</SelectItem>
+                  <SelectItem value="mr">मराठी</SelectItem>
+                  <SelectItem value="te">తెలుగు</SelectItem>
+                  <SelectItem value="ta">தமிழ்</SelectItem>
+                  <SelectItem value="bn">বাংলা</SelectItem>
+                </SelectContent>
+              </Select>
+            </View>
           </View>
         </View>
         <View style={styles.statsBar}>
