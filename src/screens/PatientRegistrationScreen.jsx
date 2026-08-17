@@ -6,24 +6,23 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Phone, ArrowLeft, User } from 'lucide-react-native';
 import { toast } from 'sonner-native';
 import { useAppContext } from '../context/AppContext';
-<<<<<<< HEAD
 import { auth, signInWithPhoneNumber, RecaptchaVerifier } from '../services/firebase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getOrCreateUserByPhone } from '../services/userService';
-=======
-import { supabase } from '../services/supabaseClient';
 import { useTranslation } from '../hooks/useTranslation';
->>>>>>> origin/main
 
 export function PatientRegistrationScreen() {
-    const { setState } = useAppContext();
+    const { state, setState } = useAppContext();
     const { t } = useTranslation();
     const [phone, setPhone] = useState('');
     const [loading, setLoading] = useState(false);
     const [phoneError, setPhoneError] = useState('');
 
     const handleBack = () => {
-        setState(prev => ({ ...prev, currentView: 'portal' }));
+        // If user already has patient info (coming from 'Change Details'), go back to dashboard
+        // Otherwise go back to the portal (landing page)
+        const dest = state.patientInfo ? 'patient-dashboard' : 'portal';
+        setState(prev => ({ ...prev, currentView: dest }));
     };
 
     const validatePhone = (p) => {
@@ -76,7 +75,6 @@ export function PatientRegistrationScreen() {
                 currentView: 'otp-verification'
             }));
         } catch (error) {
-<<<<<<< HEAD
             console.error('Firebase OTP Send Error:', error);
             // Fallback for local testing / demo without strict Firebase SMS setup
             toast.info('Moving to OTP verification screen');
@@ -85,10 +83,6 @@ export function PatientRegistrationScreen() {
                 pendingRegistrationPhone: formattedPhone,
                 currentView: 'otp-verification'
             }));
-=======
-            console.error('OTP Send Error:', error);
-            toast.error(error.message || t('regOtpFailed'));
->>>>>>> origin/main
         } finally {
             setLoading(false);
         }
@@ -146,7 +140,6 @@ export function PatientRegistrationScreen() {
                                 </Text>
                             </Button>
 
-<<<<<<< HEAD
                             <Button 
                                 onPress={async () => {
                                     const testPhone = '+919999999999';
@@ -160,10 +153,6 @@ export function PatientRegistrationScreen() {
                                     try {
                                         await AsyncStorage.setItem('current-patient-info', JSON.stringify(patientInfo));
                                     } catch (e) {}
-=======
-                            <Button
-                                onPress={() => {
->>>>>>> origin/main
                                     setState(prev => ({
                                         ...prev,
                                         patientInfo: patientInfo,

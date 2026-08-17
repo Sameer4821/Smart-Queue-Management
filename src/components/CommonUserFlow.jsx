@@ -1,9 +1,5 @@
-<<<<<<< HEAD
 var _interopRequireWildcard = require("@babel/runtime/helpers/interopRequireWildcard");
 var _interopRequireDefault = require("@babel/runtime/helpers/interopRequireDefault"); Object.defineProperty(exports, "__esModule", { value: true }); exports.CommonUserFlow = CommonUserFlow; var _toConsumableArray2 = _interopRequireDefault(require("@babel/runtime/helpers/toConsumableArray")); var _asyncToGenerator2 = _interopRequireDefault(require("@babel/runtime/helpers/asyncToGenerator")); var _slicedToArray2 = _interopRequireDefault(require("@babel/runtime/helpers/slicedToArray")); var _react = _interopRequireWildcard(require("react"));
-=======
-var _interopRequireDefault = require("@babel/runtime/helpers/interopRequireDefault"); Object.defineProperty(exports, "__esModule", { value: true }); exports.CommonUserFlow = CommonUserFlow; var _toConsumableArray2 = _interopRequireDefault(require("@babel/runtime/helpers/toConsumableArray")); var _slicedToArray2 = _interopRequireDefault(require("@babel/runtime/helpers/slicedToArray")); var _react = _interopRequireWildcard(require("react"));
->>>>>>> origin/main
 var _reactNative = require("react-native");
 var _AppContext = require("../context/AppContext");
 var _useTranslation = require("../hooks/useTranslation");
@@ -14,13 +10,8 @@ var _label = require("./ui/label");
 var _select = require("./ui/select");
 
 var _badge = require("./ui/badge");
-<<<<<<< HEAD
 var _lucideReactNative = require("lucide-react-native"); var _jsxRuntime = require("react/jsx-runtime");
-// Firebase real-time integration active
-=======
-var _lucideReactNative = require("lucide-react-native"); var _jsxRuntime = require("react/jsx-runtime"); function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }
-// Assuming sonner is being used via some native equivalent or we can just use Alert
->>>>>>> origin/main
+var _Alert = _reactNative.Alert;
 
 var manualTimeSlots = [
     { time: '09:00', label: '9:00 AM', crowdLevel: 'Low', color: '#16a34a' },
@@ -90,20 +81,24 @@ function CommonUserFlow() {
 
     var handleFormSubmit = function handleFormSubmit() {
         if (!formData.age || !formData.gender || !formData.primaryDepartment) {
-            console.log('Please fill all required fields');
+            _reactNative.Alert.alert(
+                'Missing Information',
+                'Please fill in your age, gender, and select a department to continue.'
+            );
             return;
         }
         setStep('scheduling');
     };
 
-    var generateToken = function generateToken() {
+    var generateToken = function generateToken(effectiveScheduleMethod) {
         if (!state.patientInfo) throw new Error('Patient information not available');
         var now = new Date();
         var scheduledTime;
+        var resolvedMethod = effectiveScheduleMethod || formData.schedulingMethod;
 
-        if (formData.schedulingMethod === 'auto' && formData.autoTime) {
+        if (resolvedMethod === 'auto' && formData.autoTime) {
             scheduledTime = formData.autoTime;
-        } else {
+        } else if (formData.timeSlot) {
             scheduledTime = new Date();
             var _formData$timeSlot$sp = formData.timeSlot.split(':'), _formData$timeSlot$sp2 = (0, _slicedToArray2.default)(_formData$timeSlot$sp, 2), hours = _formData$timeSlot$sp2[0], minutes = _formData$timeSlot$sp2[1];
             scheduledTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
@@ -161,155 +156,100 @@ function CommonUserFlow() {
         };
     };
 
-<<<<<<< HEAD
-var _firebase = require("../services/firebase");
+    var _firebase = require("../services/firebase");
 
     var handleTokenGeneration = /*#__PURE__*/function () {
-        var _ref = (0, _asyncToGenerator2.default)(function* () {
-            if (formData.schedulingMethod === 'manual' && !formData.timeSlot) {
+        var _ref = (0, _asyncToGenerator2.default)(function* (overrideMethod) {
+            var effectiveMethod = overrideMethod || formData.schedulingMethod;
+            if (effectiveMethod === 'manual' && !formData.timeSlot) {
+                _reactNative.Alert.alert('Select a Time Slot', 'Please pick one of the available time slots before continuing.');
                 return;
             }
+            if (isBooking || bookingInProgress.current) return;
+            setIsBooking(true);
+            bookingInProgress.current = true;
+
+            var newToken = null;
             try {
                 var userService = require("../services/userService");
                 var asyncStorage = require("@react-native-async-storage/async-storage").default;
-                
+
                 var patientName = formData.name ? formData.name.trim() : (state.patientInfo ? state.patientInfo.name : '');
-                
+
                 // Save name to existing Firestore user record if entered
                 if (patientName && state.patientInfo) {
-                    yield userService.saveUserNameToUserRecord(state.patientInfo.uid, state.patientInfo.phone, patientName);
-                    var updatedPatientInfo = Object.assign({}, state.patientInfo, { name: patientName });
                     try {
+                        yield userService.saveUserNameToUserRecord(state.patientInfo.uid, state.patientInfo.phone, patientName);
+                        var updatedPatientInfo = Object.assign({}, state.patientInfo, { name: patientName });
                         yield asyncStorage.setItem('current-patient-info', JSON.stringify(updatedPatientInfo));
-                    } catch (e) {}
+                    } catch (nameErr) {
+                        console.warn('Could not save patient name:', nameErr);
+                    }
                 }
 
-                var newToken = generateToken();
+                newToken = generateToken(effectiveMethod);
                 if (patientName) {
                     newToken.patient.name = patientName;
                 }
-                
-                // Firestore atomic transaction to prevent race conditions and duplicate positions
-                yield (0, _firebase.runTransaction)(_firebase.db, /*#__PURE__*/function () {
-                    var _tr = (0, _asyncToGenerator2.default)(function* (transaction) {
-                        var queueRef = (0, _firebase.doc)(_firebase.db, 'queues', newToken.primaryDepartment);
-                        var tokenRef = (0, _firebase.doc)(_firebase.db, 'tokens', newToken.id);
-                        var queueSnap = yield transaction.get(queueRef);
 
-                        var currentCount = 0;
-                        if (queueSnap.exists()) {
-                            currentCount = queueSnap.data().totalTokensToday || 0;
-                        }
-                        var nextCount = currentCount + 1;
+                // Firestore write is best-effort — app works even if Firestore is unavailable
+                try {
+                    yield (0, _firebase.runTransaction)(_firebase.db, /*#__PURE__*/function () {
+                        var _tr = (0, _asyncToGenerator2.default)(function* (transaction) {
+                            var queueRef = (0, _firebase.doc)(_firebase.db, 'queues', newToken.primaryDepartment);
+                            var tokenRef = (0, _firebase.doc)(_firebase.db, 'tokens', newToken.id);
+                            var queueSnap = yield transaction.get(queueRef);
 
-                        transaction.set(tokenRef, Object.assign({}, newToken, {
-                            timestamp: newToken.timestamp.toISOString(),
-                            scheduledTime: newToken.scheduledTime ? newToken.scheduledTime.toISOString() : null,
-                            validUntil: newToken.validUntil ? newToken.validUntil.toISOString() : null,
-                            createdAt: newToken.createdAt ? newToken.createdAt.toISOString() : new Date().toISOString(),
-                            token_id: newToken.id,
-                            patient_name: newToken.patient.name,
-                            department: newToken.primaryDepartment,
-                            doctor_id: formData.assignedDoctor || null,
-                            status: 'waiting',
-                            updatedAt: new Date().toISOString()
-                        }));
+                            var currentCount = 0;
+                            if (queueSnap.exists()) {
+                                currentCount = queueSnap.data().totalTokensToday || 0;
+                            }
+                            var nextCount = currentCount + 1;
 
-                        transaction.set(queueRef, {
-                            totalTokensToday: nextCount,
-                            lastUpdated: new Date().toISOString()
-                        }, { merge: true });
-                    });
-                    return function (_x) { return _tr.apply(this, arguments); };
-                }());
-                
-                // Local State update for instant UI feedback
+                            transaction.set(tokenRef, Object.assign({}, newToken, {
+                                timestamp: newToken.timestamp.toISOString(),
+                                scheduledTime: newToken.scheduledTime ? newToken.scheduledTime.toISOString() : null,
+                                validUntil: newToken.validUntil ? newToken.validUntil.toISOString() : null,
+                                createdAt: newToken.createdAt ? newToken.createdAt.toISOString() : new Date().toISOString(),
+                                token_id: newToken.id,
+                                patient_name: newToken.patient.name,
+                                department: newToken.primaryDepartment,
+                                doctor_id: formData.assignedDoctor || null,
+                                status: 'waiting',
+                                updatedAt: new Date().toISOString()
+                            }));
+
+                            transaction.set(queueRef, {
+                                totalTokensToday: nextCount,
+                                lastUpdated: new Date().toISOString()
+                            }, { merge: true });
+                        });
+                        return function (_x) { return _tr.apply(this, arguments); };
+                    }());
+                } catch (firestoreErr) {
+                    // Firestore failed — log and continue; token is still usable locally
+                    console.warn("Firestore write failed (continuing with local token):", firestoreErr);
+                }
+
+                // Always navigate to token display — works offline too
+                var finalPatientName = patientName;
                 setState(function (prev) {
-                    return Object.assign({},
-                        prev, {
-                        tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens.filter(function(t) { return t.id !== newToken.id; })), [newToken]),
-                        patientInfo: patientName ? Object.assign({}, prev.patientInfo, { name: patientName }) : prev.patientInfo,
+                    return Object.assign({}, prev, {
+                        tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens.filter(function (t) { return t.id !== newToken.id; })), [newToken]),
+                        patientInfo: finalPatientName ? Object.assign({}, prev.patientInfo, { name: finalPatientName }) : prev.patientInfo,
                         currentToken: newToken,
                         currentView: 'token'
                     });
                 });
             } catch (error) {
-                console.error("Firestore Transaction Error (CommonUserFlow):", error);
-=======
-    var handleTokenGeneration = function handleTokenGeneration() {
-        if (bookingInProgress.current || isBooking) return;
-        if (formData.schedulingMethod === 'manual' && !formData.timeSlot) {
-            return;
-        }
-        bookingInProgress.current = true;
-        setIsBooking(true);
-        try {
-            var newToken = generateToken();
-            var _supabaseClient = require("../services/supabaseClient");
-            const deptObj = state.departments.find(d => d.name === formData.primaryDepartment);
-            const deptId = deptObj ? deptObj.id : 'gen_med';
-            
-             _supabaseClient.supabase.from('queue').insert({
-                token_id: newToken.id,
-                patient_name: newToken.patient.name,
-                doctor_id: (formData.assignedDoctor && formData.assignedDoctor !== 'any') ? formData.assignedDoctor : null,
-                status: 'waiting',
-                department: formData.primaryDepartment,
-                patient_phone: formData.isAssisted ? (formData.phone || '') : (state.patientInfo.phone || ''),
-                patient_age: formData.isAssisted ? parseInt(formData.age || '0') : null,
-                patient_gender: formData.isAssisted ? formData.gender : null,
-                booking_type: formData.isAssisted ? 'assisted' : 'self',
-                token_data: newToken
-            }).then(function(res) {
-                if (res.error) {
-                    console.error("Supabase queue insert failed:", {
-                        message: res.error.message,
-                        code: res.error.code,
-                        details: res.error.details,
-                        hint: res.error.hint
-                    });
-                    bookingInProgress.current = false;
-                    setIsBooking(false);
-                } else {
-                    _supabaseClient.supabase.from('queue_visits').insert({
-                        token_id: newToken.id,
-                        department_id: deptId,
-                        doctor_id: (formData.assignedDoctor && formData.assignedDoctor !== 'any') ? formData.assignedDoctor : null,
-                        status: 'waiting',
-                        sequence_order: 1
-                    }).then(function(vRes) {
-                        if (vRes.error) {
-                            console.error("Supabase queue_visits insert failed:", {
-                                message: vRes.error.message,
-                                code: vRes.error.code,
-                                details: vRes.error.details,
-                                hint: vRes.error.hint
-                            });
-                            // Cleanup queue table to maintain consistency
-                            _supabaseClient.supabase.from('queue').delete().eq('token_id', newToken.id).catch(console.error);
-                            bookingInProgress.current = false;
-                            setIsBooking(false);
-                        }
-                    });
-                }
-            });
-
-            setState(function (prev) {
-                return Object.assign({},
-                    prev, {
-                    tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens), [newToken]),
-                    currentToken: newToken,
-                    currentView: 'token'
-                });
->>>>>>> origin/main
+                console.error("Token generation error (CommonUserFlow):", error);
+                _reactNative.Alert.alert('Error', 'Could not generate token. Please check your details and try again.');
+            } finally {
+                setIsBooking(false);
+                bookingInProgress.current = false;
             }
-            );
-        } catch (error) {
-            console.log(error);
-            bookingInProgress.current = false;
-            setIsBooking(false);
-        }
-    };
+        }); return function handleTokenGeneration(overrideMethod) { return _ref.apply(this, arguments); };
+    }();
 
     if (!state.patientInfo) return null;
 
@@ -418,14 +358,14 @@ var _firebase = require("../services/firebase");
                                 ),/*#__PURE__*/
 
                                 (0, _jsxRuntime.jsxs)(_reactNative.View, {
-                                     children: [/*#__PURE__*/
-                                         (0, _jsxRuntime.jsx)(_label.Label, { children: t.symptoms || "Symptoms" }),/*#__PURE__*/
-                                         (0, _jsxRuntime.jsx)(_input.Input, {
-                                             value: formData.symptoms,
-                                             onChangeText: function onChangeText(val) { return setFormData(Object.assign({}, formData, { symptoms: val })); },
-                                             placeholder: t.symptomsPlaceholder || "Describe your symptoms"
-                                         })]
-                                 }),/*#__PURE__*/
+                                    children: [/*#__PURE__*/
+                                        (0, _jsxRuntime.jsx)(_label.Label, { children: t.symptoms || "Symptoms" }),/*#__PURE__*/
+                                        (0, _jsxRuntime.jsx)(_input.Input, {
+                                            value: formData.symptoms,
+                                            onChangeText: function onChangeText(val) { return setFormData(Object.assign({}, formData, { symptoms: val })); },
+                                            placeholder: t.symptomsPlaceholder || "Describe your symptoms"
+                                        })]
+                                }),/*#__PURE__*/
 
                                 (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                     children: [/*#__PURE__*/
@@ -520,7 +460,10 @@ var _firebase = require("../services/firebase");
                         (0, _jsxRuntime.jsxs)(_card.CardContent, {
                             style: { gap: 16 }, children: [/*#__PURE__*/
                                 (0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
-                                    onPress: function onPress() { setFormData(Object.assign({}, formData, { schedulingMethod: 'auto' })); setTimeout(handleTokenGeneration, 500); }, children:/*#__PURE__*/
+                                    onPress: function onPress() {
+                                        setFormData(function(prev) { return Object.assign({}, prev, { schedulingMethod: 'auto' }); });
+                                        handleTokenGeneration('auto');
+                                    }, children:/*#__PURE__*/
                                         (0, _jsxRuntime.jsx)(_card.Card, {
                                             style: [styles.methodCard, { borderLeftColor: '#16a34a' }], children:/*#__PURE__*/
                                                 (0, _jsxRuntime.jsxs)(_card.CardContent, {
@@ -540,7 +483,10 @@ var _firebase = require("../services/firebase");
                                 ),/*#__PURE__*/
 
                                 (0, _jsxRuntime.jsx)(_reactNative.TouchableOpacity, {
-                                    onPress: function onPress() { setFormData(Object.assign({}, formData, { schedulingMethod: 'manual' })); setStep('timeSlot'); }, children:/*#__PURE__*/
+                                    onPress: function onPress() {
+                                        setFormData(function(prev) { return Object.assign({}, prev, { schedulingMethod: 'manual' }); });
+                                        setStep('timeSlot');
+                                    }, children:/*#__PURE__*/
                                         (0, _jsxRuntime.jsx)(_card.Card, {
                                             style: [styles.methodCard, { borderLeftColor: '#2563eb' }], children:/*#__PURE__*/
                                                 (0, _jsxRuntime.jsxs)(_card.CardContent, {
@@ -593,7 +539,7 @@ var _firebase = require("../services/firebase");
                                 }
                                 ),/*#__PURE__*/
                                 (0, _jsxRuntime.jsx)(_button.Button, {
-                                    onPress: handleTokenGeneration, disabled: !formData.timeSlot || isBooking, style: { marginTop: 16 }, children:/*#__PURE__*/
+                                    onPress: function onPress() { handleTokenGeneration('manual'); }, disabled: !formData.timeSlot || isBooking, style: { marginTop: 16 }, children:/*#__PURE__*/
                                         (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff' }, children: isBooking ? (t.generatingToken || 'Generating token...') : t.bookAppointment })
                                 }
                                 )]

@@ -94,7 +94,8 @@ function TokenDisplay(_ref) {
     }();
 
     var handleBackToPrevious = function handleBackToPrevious() {
-        setState(function (prev) { return Object.assign({}, prev, { currentView: prev.currentView === 'token-display' ? 'patient-dashboard' : prev.currentView }); });
+        // currentView is 'token' (not 'token-display'), so we just go to patient-dashboard
+        setState(function (prev) { return Object.assign({}, prev, { currentView: 'patient-dashboard' }); });
     };
 
     var handleBackToHome = function handleBackToHome() {

@@ -6,12 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { ArrowLeft, Key, UserCheck } from 'lucide-react-native';
 import { toast } from 'sonner-native';
 import { useAppContext } from '../context/AppContext';
-<<<<<<< HEAD
 import { db, doc, getDoc, setDoc, collection, query, where, getDocs } from '../services/firebase';
-=======
-import { supabase } from '../services/supabaseClient';
 import { useTranslation } from '../hooks/useTranslation';
->>>>>>> origin/main
 
 export function StaffLoginScreen() {
     const { setState } = useAppContext();
@@ -35,7 +31,6 @@ export function StaffLoginScreen() {
         setError('');
 
         try {
-<<<<<<< HEAD
             // Check Firestore staff_accounts collection
             const staffRef = doc(db, 'staff_accounts', staffId.trim());
             let staffSnap = await getDoc(staffRef);
@@ -70,25 +65,6 @@ export function StaffLoginScreen() {
                 }
             } else if (staffData.password_hash && staffData.password_hash !== password.trim()) {
                 throw new Error("Invalid Staff ID or Password");
-=======
-            // Note: Secure authentication should ideally go through a Supabase serverless function or proper Supabase identity 
-            // Here we emulate a simple table query just to fulfill the staff requirement logic per instructions
-
-            const { data: staffData, error: staffError } = await supabase
-                .from('staff_accounts')
-                .select('*')
-                .eq('staff_id', staffId)
-                .single();
-
-            if (staffError) {
-                throw new Error(t('staffLoginFailed'));
-            }
-
-            // In production: DO NOT compare plaintext passwords. A secure server or Supabase Auth should handle passwords.
-            // Using placeholder raw comparison based on instructions for simple validation logic:
-            if (staffData.password_hash !== password) {
-                throw new Error(t('staffLoginFailed'));
->>>>>>> origin/main
             }
 
             toast.success(t('staffLoginSuccess'));

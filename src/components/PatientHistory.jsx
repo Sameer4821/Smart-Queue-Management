@@ -61,7 +61,13 @@ export function PatientHistory({ onBack }) {
                     <Card key={index} style={[styles.card, token.status === 'active' && { borderColor: '#3b82f6', borderWidth: 2 }]}>
                         <CardHeader style={styles.cardHeader}>
                             <View>
-                                <CardTitle>{token.department}</CardTitle>
+                                <CardTitle>
+                                    {token.type === 'emergency'
+                                        ? `Emergency: ${token.emergency_type || token.patient?.symptoms?.split(':')[0] || 'Emergency Alert'}`
+                                        : token.type === 'disabled'
+                                            ? `Accessibility: ${token.primaryDepartment || 'General'}`
+                                            : token.primaryDepartment || token.department || 'General'}
+                                </CardTitle>
                                 <Text style={styles.dateText}>{token.timestamp ? new Date(token.timestamp).toLocaleDateString() : new Date().toLocaleDateString()}</Text>
                             </View>
                             <View style={{ alignItems: 'flex-end', gap: 4 }}>

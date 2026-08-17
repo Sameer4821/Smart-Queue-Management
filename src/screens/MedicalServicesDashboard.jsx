@@ -12,12 +12,8 @@ var _badge = require("../components/ui/badge");
 var _input = require("../components/ui/input");
 
 var _lucideReactNative = require("lucide-react-native");
-<<<<<<< HEAD
 var _asyncStorage = _interopRequireDefault(require("@react-native-async-storage/async-storage")); 
 var _jsxRuntime = require("react/jsx-runtime");
-=======
-var _asyncStorage = _interopRequireDefault(require("@react-native-async-storage/async-storage")); var _jsxRuntime = require("react/jsx-runtime"); function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }// import { Progress } from './ui/progress';
->>>>>>> origin/main
 
 
 
@@ -31,7 +27,6 @@ function PatientDashboard() {
     var _useState5 = (0, _react.useState)(false), _useState6 = (0, _slicedToArray2.default)(_useState5, 2), showPatientHistory = _useState6[0], setShowPatientHistory = _useState6[1];
     var remainingEmergency = state.maxEmergencyPerDay - state.emergencyCount;
 
-<<<<<<< HEAD
     var _useState7 = (0, _react.useState)(null), _useState8 = (0, _slicedToArray2.default)(_useState7, 2), latestPrescription = _useState8[0], setLatestPrescription = _useState8[1];
     var pulseAnim = (0, _react.useRef)(new _reactNative.Animated.Value(0)).current;
 
@@ -42,7 +37,7 @@ function PatientDashboard() {
         var patientId = state.patientInfo.phone || state.patientInfo.email;
         if (!patientId) return;
 
-        var activeToken = state.tokens.find(function (t) { return t.patient.email === state.patientInfo.email && t.status === 'active'; });
+        var activeToken = state.tokens.find(function (t) { return (t.patient && (t.patient.email === state.patientInfo.email || t.patient.phone === state.patientInfo.phone)) && t.status === 'active'; });
         if (!activeToken) return;
 
         var q = (0, _firebase.query)(
@@ -73,7 +68,9 @@ function PatientDashboard() {
             ).start();
         } else {
             pulseAnim.setValue(0);
-=======
+        }
+    }, [latestPrescription]);
+
     var patientTokens = state.tokens.filter(function (tok) {
         var _state$patientInfo;
         const patientPhone = (_state$patientInfo = state.patientInfo) == null ? void 0 : _state$patientInfo.phone;
@@ -82,7 +79,6 @@ function PatientDashboard() {
         const tokEmail = tok.patient && tok.patient.email;
         if (patientPhone && tokPhone) {
             return tokPhone === patientPhone;
->>>>>>> origin/main
         }
         if (patientEmail && tokEmail) {
             return tokEmail === patientEmail;
@@ -115,30 +111,25 @@ function PatientDashboard() {
                 const updatedToken = Object.assign({}, activePatientToken, {
                     patient: Object.assign({}, activePatientToken.patient, {
                         symptoms: symptomsInput
-                    }),
-                    token_data: Object.assign({}, activePatientToken.token_data || {}, {
-                        patient: Object.assign({}, (activePatientToken.token_data || {}).patient || {}, {
-                            symptoms: symptomsInput
-                        })
                     })
                 });
                 
-                const _supabaseClient = require("../services/supabaseClient");
-                const { error } = yield _supabaseClient.supabase
-                    .from('queue')
-                    .update({ token_data: updatedToken })
-                    .eq('token_id', activePatientToken.id);
-                    
-                if (error) {
-                    console.error("Failed to update symptoms in Supabase:", error);
-                } else {
-                    setState(function(prev) {
-                        return Object.assign({}, prev, {
-                            tokens: prev.tokens.map(function(t) { return t.id === activePatientToken.id ? updatedToken : t; }),
-                            currentToken: prev.currentToken && prev.currentToken.id === activePatientToken.id ? updatedToken : prev.currentToken
-                        });
+                const _firebase = require("../services/firebase");
+                try {
+                    yield (0, _firebase.updateDoc)((0, _firebase.doc)(_firebase.db, 'tokens', activePatientToken.id), {
+                        patient: updatedToken.patient,
+                        updatedAt: new Date().toISOString()
                     });
+                } catch (fbErr) {
+                    console.error("Failed to update symptoms in Firestore:", fbErr);
                 }
+
+                setState(function(prev) {
+                    return Object.assign({}, prev, {
+                        tokens: prev.tokens.map(function(t) { return t.id === activePatientToken.id ? updatedToken : t; }),
+                        currentToken: prev.currentToken && prev.currentToken.id === activePatientToken.id ? updatedToken : prev.currentToken
+                    });
+                });
             } catch (err) {
                 console.error("Error updating symptoms:", err);
             } finally {
@@ -241,17 +232,10 @@ function PatientDashboard() {
                                     style: [styles.welcomeRow, isMobile && { flexDirection: 'column', textAlign: 'center' }], children: [/*#__PURE__*/
                                         (0, _jsxRuntime.jsx)(_reactNative.View, { style: styles.userIconWrap, children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_lucideReactNative.User, { size: 24, color: "#2563eb" }) }),/*#__PURE__*/
                                         (0, _jsxRuntime.jsxs)(_reactNative.View, {
-<<<<<<< HEAD
                                             style: [{ flex: 1, minWidth: 0 }, isMobile && { marginRight: 0 }], children: [/*#__PURE__*/
                                                 (0, _jsxRuntime.jsx)(_reactNative.Text, { style: [styles.welcomeTitle, isMobile && styles.welcomeTitleMobile], numberOfLines: 2, children: state.patientInfo.name ? `${t.pdWelcomeBack}, ${state.patientInfo.name}` : t.pdWelcomeBack }),/*#__PURE__*/
                                                 state.patientInfo.email ? (0, _jsxRuntime.jsx)(_reactNative.Text, { style: [styles.welcomeSub, isMobile && styles.welcomeSubMobile], numberOfLines: 1, children: state.patientInfo.email }) : null,/*#__PURE__*/
                                                 state.patientInfo.phone ? (0, _jsxRuntime.jsx)(_reactNative.Text, { style: [styles.welcomeSub, isMobile && styles.welcomeSubMobile], numberOfLines: 1, children: state.patientInfo.phone }) : null]
-=======
-                                            style: [{ flex: 1 }, isMobile && { alignItems: 'center', marginVertical: 12 }], children: [/*#__PURE__*/
-                                                (0, _jsxRuntime.jsxs)(_reactNative.Text, { style: styles.welcomeTitle, children: [t.pdWelcomeBack, ", ", state.patientInfo.name] }),/*#__PURE__*/
-                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: styles.welcomeSub, children: state.patientInfo.email }),/*#__PURE__*/
-                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: styles.welcomeSub, children: state.patientInfo.phone })]
->>>>>>> origin/main
                                         }
                                         ),/*#__PURE__*/
                                         (0, _jsxRuntime.jsx)(_badge.Badge, { variant: "secondary", children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, { children: t.pdLoggedInAs }) })]
@@ -334,7 +318,7 @@ function PatientDashboard() {
                                                         ),/*#__PURE__*/
                                                         (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                                             style: [{ alignItems: 'flex-end' }, isMobile && { alignItems: 'center', width: '100%', marginTop: 8 }], children: [/*#__PURE__*/
-                                                                (0, _jsxRuntime.jsx)(_badge.Badge, { variant: "outline", children:/*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, { children: ["Queue: ", state.tokens.filter(function (tok) { return tok.type === 'common' && tok.status === 'active'; }).length] }) }),/*#__PURE__*/
+                                                                (0, _jsxRuntime.jsx)(_badge.Badge, { variant: "outline", children:/*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, { children: ["Queue: ", state.tokens.filter(function (tok) { return tok.type === 'common' && (tok.status === 'active' || tok.status === 'waiting'); }).length] }) }),/*#__PURE__*/
                                                                 (0, _jsxRuntime.jsx)(_button.Button, { style: { marginTop: 8 }, onPress: function onPress() { return handleCategorySelect('common'); }, children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff' }, children: t.pdSelect }) })]
                                                         }
                                                         )]
@@ -360,12 +344,14 @@ function PatientDashboard() {
                                                         ),/*#__PURE__*/
                                                         (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                                             style: [{ alignItems: 'flex-end' }, isMobile && { alignItems: 'center', width: '100%', marginTop: 8 }], children: [/*#__PURE__*/
-                                                                (0, _jsxRuntime.jsx)(_badge.Badge, { variant: "destructive", children:/*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, { style: { color: '#fff' }, children: ["Queue: ", state.tokens.filter(function (tok) { return tok.type === 'emergency' && tok.status === 'active'; }).length] }) }),/*#__PURE__*/
+                                                                (0, _jsxRuntime.jsx)(_badge.Badge, { variant: "destructive", children:/*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, { style: { color: '#fff' }, children: ["Queue: ", state.tokens.filter(function (tok) { return tok.type === 'emergency' && (tok.status === 'active' || tok.status === 'waiting'); }).length] }) }),/*#__PURE__*/
                                                                 (0, _jsxRuntime.jsx)(_button.Button, {
-                                                                    variant: "destructive", disabled: remainingEmergency <= 0, style: { marginTop: 8 }, children:/*#__PURE__*/
-                                                                        (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff' }, children: remainingEmergency <= 0 ? t.pdLimitReached : t.pdSelect })
-                                                                }
-                                                                )]
+                                                                    variant: "destructive",
+                                                                    disabled: remainingEmergency <= 0,
+                                                                    onPress: function onPress() { return remainingEmergency > 0 && handleCategorySelect('emergency'); },
+                                                                    style: { marginTop: 8 },
+                                                                    children: (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff' }, children: remainingEmergency <= 0 ? t.pdLimitReached : t.pdSelect })
+                                                                })]
                                                         }
                                                         )]
                                                 }
@@ -390,7 +376,7 @@ function PatientDashboard() {
                                                         ),/*#__PURE__*/
                                                         (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                                             style: [{ alignItems: 'flex-end' }, isMobile && { alignItems: 'center', width: '100%', marginTop: 8 }], children: [/*#__PURE__*/
-                                                                (0, _jsxRuntime.jsx)(_badge.Badge, { variant: "secondary", children:/*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, { children: ["Queue: ", state.tokens.filter(function (tok) { return tok.type === 'disabled' && tok.status === 'active'; }).length] }) }),/*#__PURE__*/
+                                                                (0, _jsxRuntime.jsx)(_badge.Badge, { variant: "secondary", children:/*#__PURE__*/(0, _jsxRuntime.jsxs)(_reactNative.Text, { children: ["Queue: ", state.tokens.filter(function (tok) { return tok.type === 'disabled' && (tok.status === 'active' || tok.status === 'waiting'); }).length] }) }),/*#__PURE__*/
                                                                 (0, _jsxRuntime.jsx)(_button.Button, { style: { marginTop: 8 }, onPress: function onPress() { return handleCategorySelect('disabled'); }, children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff' }, children: t.pdSelect }) })]
                                                         }
                                                         )]

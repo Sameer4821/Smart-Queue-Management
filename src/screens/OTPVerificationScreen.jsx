@@ -8,12 +8,9 @@ import { toast } from 'sonner-native';
 import { useAppContext } from '../context/AppContext';
 import { auth, db, doc, setDoc, getDoc, signInWithPhoneNumber, RecaptchaVerifier } from '../services/firebase';
 import { OTPInput } from '../components/OTPInput';
-<<<<<<< HEAD
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getOrCreateUserByPhone } from '../services/userService';
-=======
 import { useTranslation } from '../hooks/useTranslation';
->>>>>>> origin/main
 
 export function OTPVerificationScreen() {
     const { state, setState } = useAppContext();
@@ -26,7 +23,7 @@ export function OTPVerificationScreen() {
     const confirmationResult = state.confirmationResult;
 
     const handleBack = () => {
-        setState(prev => ({ ...prev, currentView: 'portal' }));
+        setState(prev => ({ ...prev, currentView: 'patient-registration' }));
     };
 
     const handleResendOtp = async () => {

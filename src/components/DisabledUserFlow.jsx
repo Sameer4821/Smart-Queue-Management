@@ -11,13 +11,9 @@ var _checkbox = require("./ui/checkbox");
 
 var _select = require("./ui/select");
 
-<<<<<<< HEAD
-var _lucideReactNative = require("lucide-react-native"); var _jsxRuntime = require("react/jsx-runtime");
-// Firebase real-time integration active
-=======
 var _textarea = require("./ui/textarea");
-var _lucideReactNative = require("lucide-react-native"); var _jsxRuntime = require("react/jsx-runtime"); function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }
-var _supabaseClient = require("../services/supabaseClient");
+var _lucideReactNative = require("lucide-react-native"); 
+var _jsxRuntime = require("react/jsx-runtime");
 var _useTranslation = require("../hooks/useTranslation");
 
 var disabilityTypeKeys = {
@@ -36,8 +32,6 @@ var assistanceOptionKeys = {
     'Personal care attendant': 'emgPersonalCare',
     'Accessible restroom': 'emgRestroom'
 };
-
->>>>>>> origin/main
 
 var disabilityTypes = [
     { value: 'mobility', label: 'Mobility Impairment', icon: _lucideReactNative.User },
@@ -131,6 +125,8 @@ function DisabledUserFlow() {
         if (formData.otherAssistance.trim()) {
             allAssistanceNeeded.push(`Other: ${formData.otherAssistance.trim()}`);
         }
+        var deptObjForVisit = state.departments.find(function(d) { return d.name === formData.primaryDepartment; });
+        var deptIdForVisit = deptObjForVisit ? deptObjForVisit.id : 'gen_med';
 
         return {
             id: tokenId,
@@ -143,7 +139,8 @@ function DisabledUserFlow() {
                 phone: state.patientInfo.phone,
                 age: formData.age,
                 gender: formData.gender,
-                patientId: patientId
+                patientId: patientId,
+                symptoms: formData.disabilityDetails || ''
             },
             status: 'active',
             priority: priority,
@@ -153,7 +150,17 @@ function DisabledUserFlow() {
             validUntil: endOfDay,
             createdAt: now,
             schedulingMethod: 'manual',
-            visits: [],
+            visits: [{
+                id: 'visit-' + Date.now(),
+                department_id: deptIdForVisit,
+                department: formData.primaryDepartment,
+                status: 'waiting',
+                sequence_order: 1,
+                room_counter: null,
+                doctorName: null,
+                notes: formData.disabilityDetails || null,
+                timestamp: now
+            }],
             prescriptions: [],
             labTests: [],
             departmentAccess: allDepartmentNames
@@ -163,15 +170,19 @@ function DisabledUserFlow() {
     var handleFormSubmit = /*#__PURE__*/function () {
         var _ref = (0, _asyncToGenerator2.default)(function* () {
             if (!formData.age || !formData.gender || !formData.primaryDepartment || !formData.disabilityType) {
-                console.log('Please fill all required fields');
+                _reactNative.Alert.alert(
+                    'Missing Information',
+                    'Please fill in your age, gender, select a department, and select your type of accessibility need.'
+                );
                 return;
             }
             if (formData.assistanceNeeded.length === 0 && formData.otherAssistance.trim() === '') {
-                console.log('Please select assistance needed');
+                _reactNative.Alert.alert(
+                    'Support Services Required',
+                    'Please select at least one support service you need.'
+                );
                 return;
             }
-<<<<<<< HEAD
-            
             var _firebase = require("../services/firebase");
             var userService = require("../services/userService");
             var asyncStorage = require("@react-native-async-storage/async-storage").default;
@@ -193,65 +204,57 @@ function DisabledUserFlow() {
                     newToken.patient.name = patientName;
                 }
                 
-                // Firestore atomic transaction to prevent race conditions and duplicate positions
-                yield (0, _firebase.runTransaction)(_firebase.db, /*#__PURE__*/function () {
-                    var _tr = (0, _asyncToGenerator2.default)(function* (transaction) {
-                        var queueRef = (0, _firebase.doc)(_firebase.db, 'queues', newToken.primaryDepartment);
-                        var tokenRef = (0, _firebase.doc)(_firebase.db, 'tokens', newToken.id);
-                        var queueSnap = yield transaction.get(queueRef);
+                // Firestore write is best-effort — always navigate even if it fails
+                try {
+                    yield (0, _firebase.runTransaction)(_firebase.db, /*#__PURE__*/function () {
+                        var _tr = (0, _asyncToGenerator2.default)(function* (transaction) {
+                            var queueRef = (0, _firebase.doc)(_firebase.db, 'queues', newToken.primaryDepartment);
+                            var tokenRef = (0, _firebase.doc)(_firebase.db, 'tokens', newToken.id);
+                            var queueSnap = yield transaction.get(queueRef);
 
-                        var currentCount = 0;
-                        if (queueSnap.exists()) {
-                            currentCount = queueSnap.data().totalTokensToday || 0;
-                        }
-                        var nextCount = currentCount + 1;
+                            var currentCount = 0;
+                            if (queueSnap.exists()) {
+                                currentCount = queueSnap.data().totalTokensToday || 0;
+                            }
+                            var nextCount = currentCount + 1;
 
-                        transaction.set(tokenRef, Object.assign({}, newToken, {
-                            timestamp: newToken.timestamp.toISOString(),
-                            validUntil: newToken.validUntil ? newToken.validUntil.toISOString() : null,
-                            createdAt: newToken.createdAt ? newToken.createdAt.toISOString() : new Date().toISOString(),
-                            token_id: newToken.id,
-                            patient_name: newToken.patient.name,
-                            department: newToken.primaryDepartment,
-                            doctor_id: formData.assignedDoctor || null,
-                            status: 'waiting',
-                            updatedAt: new Date().toISOString()
-                        }));
+                            transaction.set(tokenRef, Object.assign({}, newToken, {
+                                timestamp: newToken.timestamp.toISOString(),
+                                validUntil: newToken.validUntil ? newToken.validUntil.toISOString() : null,
+                                createdAt: newToken.createdAt ? newToken.createdAt.toISOString() : new Date().toISOString(),
+                                token_id: newToken.id,
+                                patient_name: newToken.patient.name,
+                                department: newToken.primaryDepartment,
+                                doctor_id: formData.assignedDoctor || null,
+                                status: 'waiting',
+                                updatedAt: new Date().toISOString()
+                            }));
 
-                        transaction.set(queueRef, {
-                            totalTokensToday: nextCount,
-                            lastUpdated: new Date().toISOString()
-                        }, { merge: true });
-                    });
-                    return function (_x) { return _tr.apply(this, arguments); };
-                }());
-                
-=======
+                            transaction.set(queueRef, {
+                                totalTokensToday: nextCount,
+                                lastUpdated: new Date().toISOString()
+                            }, { merge: true });
+                        });
+                        return function (_x) { return _tr.apply(this, arguments); };
+                    }());
+                } catch (firestoreErr) {
+                    console.warn('Firestore write failed (DisabledUserFlow), continuing with local token:', firestoreErr);
+                }
 
-            try {
-                var newToken = generateDisabledToken();
-
-                // Insert into Supabase logic
-                yield _supabaseClient.supabase.from('queue').insert([{
-                    token_id: newToken.id,
-                    patient_name: newToken.patient.name,
-                    department: newToken.primaryDepartment,
-                    doctor_id: formData.assignedDoctor || null, // Assuming no assigned doc explicitly defined in disability flow yet
-                    status: 'waiting'
-                }]);
-
->>>>>>> origin/main
+                // Always navigate to token display
+                var finalPatientName = patientName;
                 setState(function (prev) {
                     return Object.assign({},
                         prev, {
                         tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens.filter(function(t) { return t.id !== newToken.id; })), [newToken]),
-                        patientInfo: patientName ? Object.assign({}, prev.patientInfo, { name: patientName }) : prev.patientInfo,
+                        patientInfo: finalPatientName ? Object.assign({}, prev.patientInfo, { name: finalPatientName }) : prev.patientInfo,
                         currentToken: newToken,
                         currentView: 'token'
                     });
                 });
             } catch (error) {
-                console.error("Firestore Transaction Error (DisabledUserFlow):", error);
+                console.error("Token generation error (DisabledUserFlow):", error);
+                _reactNative.Alert.alert('Error', 'Could not generate token. Please check your details and try again.');
             }
         }); return function handleFormSubmit() { return _ref.apply(this, arguments); };
     }();

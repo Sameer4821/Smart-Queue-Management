@@ -1,25 +1,29 @@
 var _interopRequireDefault=require("@babel/runtime/helpers/interopRequireDefault");Object.defineProperty(exports,"__esModule",{value:true});exports.Button=void 0;var _objectWithoutProperties2=_interopRequireDefault(require("@babel/runtime/helpers/objectWithoutProperties"));var _react=_interopRequireDefault(require("react"));
 var _reactNative=require("react-native");var _jsxRuntime=require("react/jsx-runtime");var _excluded=["children","onPress","variant","size","style","className","disabled"];
 
-var Button=exports.Button=function Button(_ref){var children=_ref.children,onPress=_ref.onPress,_ref$variant=_ref.variant,variant=_ref$variant===void 0?'default':_ref$variant,_ref$size=_ref.size,size=_ref$size===void 0?'default':_ref$size,style=_ref.style,className=_ref.className,disabled=_ref.disabled,props=(0,_objectWithoutProperties2.default)(_ref,_excluded);
-var w=(0,_reactNative.useWindowDimensions)().width;var mob=w<768;
-return(/*#__PURE__*/
-(0,_jsxRuntime.jsx)(_reactNative.TouchableOpacity,Object.assign({
-disabled:disabled,
-onPress:onPress,
-style:[
-styles.base,
-mob&&styles.baseMobile,
-styles[variant],
-styles[size],
-disabled&&styles.disabled,
-style]},
+var Button=exports.Button=function Button(_ref){
+  var children=_ref.children,onPress=_ref.onPress,_ref$variant=_ref.variant,variant=_ref$variant===void 0?'default':_ref$variant,_ref$size=_ref.size,size=_ref$size===void 0?'default':_ref$size,style=_ref.style,className=_ref.className,disabled=_ref.disabled,props=(0,_objectWithoutProperties2.default)(_ref,_excluded);
+  var w=(0,_reactNative.useWindowDimensions)().width;var mob=w<768;
+  
+  var content = (typeof children === 'string' || typeof children === 'number')
+    ? (0,_jsxRuntime.jsx)(_reactNative.Text,{style:[styles.textBase,mob&&styles.textBaseMobile,styles[`${variant}Text`]],children:children})
+    : children;
 
-props,{children:/*#__PURE__*/
-
-(0,_jsxRuntime.jsx)(_reactNative.Text,{style:[styles.textBase,mob&&styles.textBaseMobile,styles[`${variant}Text`]],children:children})}))
-);
-
+  return (
+    (0,_jsxRuntime.jsx)(_reactNative.TouchableOpacity,Object.assign({
+      disabled:disabled,
+      onPress:onPress,
+      activeOpacity:0.7,
+      style:[
+        styles.base,
+        mob&&styles.baseMobile,
+        styles[variant],
+        styles[size],
+        disabled&&styles.disabled,
+        style
+      ]
+    },props,{children: content}))
+  );
 };
 
 var styles=_reactNative.StyleSheet.create({

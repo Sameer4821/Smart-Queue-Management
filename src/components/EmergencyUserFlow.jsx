@@ -10,14 +10,9 @@ var _label = require("./ui/label");
 var _textarea = require("./ui/textarea");
 var _radioGroup = require("./ui/radio-group");
 var _checkbox = require("./ui/checkbox");
-<<<<<<< HEAD
-var _lucideReactNative = require("lucide-react-native"); var _jsxRuntime = require("react/jsx-runtime");
-// Firebase real-time integration active
-=======
-var _lucideReactNative = require("lucide-react-native"); var _jsxRuntime = require("react/jsx-runtime"); function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }
-var _supabaseClient = require("../services/supabaseClient");
+var _lucideReactNative = require("lucide-react-native"); 
+var _jsxRuntime = require("react/jsx-runtime");
 var _useTranslation = require("../hooks/useTranslation");
->>>>>>> origin/main
 
 var assistanceOptionKeys = {
     'Wheelchair assistance': 'emgWheelchair',
@@ -84,83 +79,13 @@ function EmergencyUserFlow() {
                 _reactNative.Alert.alert(t('emgMissingContact'), t('emgMissingContactMsg'));
                 return;
             }
-<<<<<<< HEAD
-            
-            var _firebase = require("../services/firebase");
-            var userService = require("../services/userService");
-            var asyncStorage = require("@react-native-async-storage/async-storage").default;
-
-            try {
-                var patientName = formData.name ? formData.name.trim() : (state.patientInfo ? state.patientInfo.name : '');
-                
-                // Save name to existing Firestore user record if entered
-                if (patientName && state.patientInfo) {
-                    yield userService.saveUserNameToUserRecord(state.patientInfo.uid, state.patientInfo.phone, patientName);
-                    var updatedPatientInfo = Object.assign({}, state.patientInfo, { name: patientName });
-                    try {
-                        yield asyncStorage.setItem('current-patient-info', JSON.stringify(updatedPatientInfo));
-                    } catch (e) {}
-                }
-
-                var newToken = generateEmergencyToken();
-                if (patientName) {
-                    newToken.patient.name = patientName;
-                }
-
-                sendEmergencyNotification(formData.primaryDepartment);
-                
-                // Firestore atomic transaction to prevent race conditions and duplicate positions
-                yield (0, _firebase.runTransaction)(_firebase.db, /*#__PURE__*/function () {
-                    var _tr = (0, _asyncToGenerator2.default)(function* (transaction) {
-                        var queueRef = (0, _firebase.doc)(_firebase.db, 'queues', newToken.primaryDepartment);
-                        var tokenRef = (0, _firebase.doc)(_firebase.db, 'tokens', newToken.id);
-                        var queueSnap = yield transaction.get(queueRef);
-
-                        var currentCount = 0;
-                        if (queueSnap.exists()) {
-                            currentCount = queueSnap.data().totalTokensToday || 0;
-                        }
-                        var nextCount = currentCount + 1;
-
-                        transaction.set(tokenRef, Object.assign({}, newToken, {
-                            timestamp: newToken.timestamp.toISOString(),
-                            validUntil: newToken.validUntil ? newToken.validUntil.toISOString() : null,
-                            createdAt: newToken.createdAt ? newToken.createdAt.toISOString() : new Date().toISOString(),
-                            token_id: newToken.id,
-                            patient_name: newToken.patient.name,
-                            department: newToken.primaryDepartment,
-                            doctor_id: formData.assignedDoctor || null,
-                            status: 'waiting',
-                            updatedAt: new Date().toISOString()
-                        }));
-
-                        transaction.set(queueRef, {
-                            totalTokensToday: nextCount,
-                            lastUpdated: new Date().toISOString()
-                        }, { merge: true });
-                    });
-                    return function (_x) { return _tr.apply(this, arguments); };
-                }());
-                
-                setState(function (prev) {
-                    return Object.assign({},
-                        prev, {
-                        tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens.filter(function(t) { return t.id !== newToken.id; })), [newToken]),
-                        patientInfo: patientName ? Object.assign({}, prev.patientInfo, { name: patientName }) : prev.patientInfo,
-                        currentToken: newToken,
-                        currentView: 'token',
-                        emergencyCount: prev.emergencyCount + 1
-                    });
-                });
-            } catch (error) {
-                console.error("Firestore Transaction Error (EmergencyUserFlow):", error);
-=======
-
             setIsSubmitting(true);
 
             try {
                 var now = new Date();
-                var alertId = `EMG-${now.toISOString().slice(0, 10).replace(/-/g, '')}-${now.toTimeString().slice(0, 8).replace(/:/g, '')}-${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
+                var timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '');
+                var tokenNumber = String((state.tokens.filter(function(t) { return t.type === 'emergency'; }).length) + 1).padStart(3, '0');
+                var alertId = `EMG-${timeStr}-${tokenNumber}`;
 
                 var allAssistanceNeeded = (0, _toConsumableArray2.default)(formData.assistanceNeeded);
                 if (formData.otherAssistance.trim()) {
@@ -179,20 +104,89 @@ function EmergencyUserFlow() {
                     arrival_method: formData.arrivalMethod || null,
                     estimated_arrival: formData.estimatedArrival || null,
                     assistance_needed: allAssistanceNeeded.length > 0 ? allAssistanceNeeded : [],
-                    alert_status: 'new'
+                    alert_status: 'new',
+                    created_at: now.toISOString()
                 };
 
-                // Insert into Supabase emergency_alerts table (NOT the queue table)
-                var _result = yield _supabaseClient.supabase.from('emergency_alerts').insert([alertData]);
-                if (_result.error) {
-                    console.error('Supabase emergency alert insert error:', _result.error);
+                var endOfDay = new Date();
+                endOfDay.setHours(23, 59, 59, 999);
+                var allDepartmentNames = state.departments.map(function(d) { return d.name; });
+
+                // Build a token object matching the structure used by CommonUserFlow
+                var emergencyToken = {
+                    id: alertId,
+                    type: 'emergency',
+                    primaryDepartment: 'Emergency',
+                    timestamp: now,
+                    scheduledTime: now,
+                    patient: {
+                        name: formData.name,
+                        email: (state.patientInfo && state.patientInfo.email) || '',
+                        phone: formData.contactNumber || (state.patientInfo && state.patientInfo.phone) || '',
+                        age: formData.age ? parseInt(formData.age) : 0,
+                        gender: formData.gender || 'not specified',
+                        patientId: `PAT-${now.toISOString().slice(0,10).replace(/-/g,'')}-${tokenNumber}`,
+                        symptoms: `${formData.emergencyType}: ${formData.conditionDetails}`
+                    },
+                    status: 'active',
+                    priority: 10,
+                    severity: formData.severity,
+                    emergency_type: formData.emergencyType,
+                    assistance_needed: allAssistanceNeeded,
+                    qrCode: alertId,
+                    validUntil: endOfDay,
+                    createdAt: now,
+                    schedulingMethod: 'emergency',
+                    visits: [{
+                        id: 'visit-' + Date.now(),
+                        department_id: 'emergency',
+                        department: 'Emergency',
+                        status: 'active',
+                        sequence_order: 1,
+                        room_counter: null,
+                        doctorName: null,
+                        notes: formData.conditionDetails,
+                        timestamp: now
+                    }],
+                    prescriptions: [],
+                    labTests: [],
+                    departmentAccess: allDepartmentNames
+                };
+
+                var _firebase = require("../services/firebase");
+
+                // Insert into Firestore emergency_alerts collection (for staff dashboard)
+                try {
+                    yield (0, _firebase.setDoc)((0, _firebase.doc)(_firebase.db, 'emergency_alerts', alertId), alertData);
+                } catch (fbErr) {
+                    console.log('Firestore emergency alert insert error:', fbErr);
                 }
 
-                // Also add to local state immediately
+                // Also insert into Firestore tokens collection (for queue counts + patient history)
+                try {
+                    yield (0, _firebase.setDoc)((0, _firebase.doc)(_firebase.db, 'tokens', alertId), Object.assign({}, emergencyToken, {
+                        timestamp: now.toISOString(),
+                        scheduledTime: now.toISOString(),
+                        validUntil: endOfDay.toISOString(),
+                        createdAt: now.toISOString(),
+                        token_id: alertId,
+                        patient_name: formData.name,
+                        department: 'Emergency',
+                        status: 'active',
+                        updatedAt: now.toISOString()
+                    }));
+                } catch (fbErr) {
+                    console.log('Firestore emergency token insert error:', fbErr);
+                }
+
+                // Also add to local state immediately for instant UI feedback
                 setState(function (prev) {
                     var existing = prev.emergencyAlerts || [];
                     return Object.assign({}, prev, {
-                        emergencyAlerts: [].concat((0, _toConsumableArray2.default)(existing), [Object.assign({}, alertData, { created_at: now.toISOString() })])
+                        emergencyAlerts: [].concat((0, _toConsumableArray2.default)(existing), [alertData]),
+                        emergencyCount: (prev.emergencyCount || 0) + 1,
+                        tokens: [].concat((0, _toConsumableArray2.default)(prev.tokens.filter(function(t) { return t.id !== alertId; })), [emergencyToken]),
+                        currentToken: emergencyToken
                     });
                 });
 
@@ -206,7 +200,6 @@ function EmergencyUserFlow() {
                 _reactNative.Alert.alert(t('emgError'), t('emgErrorMsg'));
             } finally {
                 setIsSubmitting(false);
->>>>>>> origin/main
             }
         }); return function handleFormSubmit() { return _ref.apply(this, arguments); };
     }();
@@ -273,9 +266,23 @@ function EmergencyUserFlow() {
                             })]
                     }),/*#__PURE__*/
 
-                    (0, _jsxRuntime.jsx)(_button.Button, {
-                        onPress: handleBack, style: { marginTop: 24, paddingHorizontal: 32 }, children: /*#__PURE__*/
-                            (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff', fontWeight: '700' }, children: t('emgReturnDashboard') })
+                    (0, _jsxRuntime.jsx)(_reactNative.View, {
+                        style: { flexDirection: 'row', gap: 12, marginTop: 24, justifyContent: 'center', flexWrap: 'wrap' },
+                        children: [
+                            (0, _jsxRuntime.jsx)(_button.Button, {
+                                onPress: function() {
+                                    setState(function(prev) {
+                                        return Object.assign({}, prev, { currentView: 'token' });
+                                    });
+                                },
+                                style: { backgroundColor: '#dc2626', flex: 1, minWidth: 140, paddingHorizontal: 16 },
+                                children: (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff', fontWeight: '700', textAlign: 'center' }, children: 'View My Token' })
+                            }),
+                            (0, _jsxRuntime.jsx)(_button.Button, {
+                                onPress: handleBack, style: { flex: 1, minWidth: 140, paddingHorizontal: 16 }, children: /*#__PURE__*/
+                                    (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff', fontWeight: '700', textAlign: 'center' }, children: t('emgReturnDashboard') })
+                            })
+                        ]
                     })]
             }));
     }

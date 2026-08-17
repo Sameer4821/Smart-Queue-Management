@@ -121,103 +121,6 @@ export function StaffDashboard() {
     }
   }, [allActiveTokens]);
 
-<<<<<<< HEAD
-  // Tick the "last updated" clock for Live Queue Display
-  useEffect(() => {
-    const tick = setInterval(() => setLastUpdated(new Date()), 30000);
-    return () => clearInterval(tick);
-  }, []);
-
-  // Derive dbRecords directly from live tokens for real-time consistency
-  useEffect(() => {
-    const recordsData = (appState.tokens || []).map((t) => ({
-      token_id: t.id,
-      patient_name: t.patient?.name || 'Walk-in Patient',
-      department: t.primaryDepartment || 'General',
-      doctor_id: t.assignedDoctor || null,
-      status: t.status === 'completed' ? 'completed' : 'active',
-      created_at: t.createdAt ? new Date(t.createdAt).toISOString() : new Date().toISOString()
-    }));
-    setDbRecords(recordsData);
-  }, [appState.tokens]);
-
-  const fetchRecords = async () => {
-    // Already synchronized in real-time from appState.tokens
-    setLoadingRecords(false);
-  };
-
-=======
-  // Supabase Real-Time Sync for Token Queue
-  useEffect(() => {
-    const channel = supabase.channel('public:queue_sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, (payload) => {
-        if (payload.eventType === 'INSERT') {
-          const newRow = payload.new;
-          const mappedToken = {
-            id: newRow.token_id,
-            type: newRow.token_id && newRow.token_id.startsWith('EME') ? 'emergency' : newRow.token_id && newRow.token_id.startsWith('ACE') ? 'disabled' : 'common',
-            primaryDepartment: newRow.department,
-            timestamp: newRow.created_at ? new Date(newRow.created_at) : new Date(),
-            patient: {
-              name: newRow.patient_name || 'Walk-in Patient',
-            },
-            status: newRow.status || 'active',
-            qrCode: newRow.token_id
-          };
-
-          setAppState(prev => {
-            const exists = prev.tokens.find(t => t.id === mappedToken.id);
-            if (exists) return prev;
-            return { ...prev, tokens: [...prev.tokens, mappedToken] };
-          });
-        }
-        else if (payload.eventType === 'UPDATE') {
-          setAppState(prev => ({
-            ...prev,
-            tokens: prev.tokens.map(t => t.id === payload.new.token_id ? { ...t, status: payload.new.status } : t)
-          }));
-        }
-        else if (payload.eventType === 'DELETE') {
-          setAppState(prev => ({
-            ...prev,
-            tokens: prev.tokens.filter(t => t.id !== payload.old.token_id)
-          }));
-        }
-      })
-      .subscribe();
-
-    // Also subscribe to emergency_alerts for realtime updates
-    const emergencyChannel = supabase.channel('staff:emergency_alerts')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'emergency_alerts' }, (payload) => {
-        if (payload.eventType === 'INSERT') {
-          setAppState(prev => {
-            const existing = prev.emergencyAlerts || [];
-            const exists = existing.find(a => a.alert_id === payload.new.alert_id);
-            if (exists) return prev;
-            toast.error(`🚨 New Emergency Alert`, {
-              description: `${payload.new.severity.toUpperCase()}: ${payload.new.emergency_type} - ${payload.new.patient_name}`,
-              duration: 10000,
-            });
-            return { ...prev, emergencyAlerts: [...existing, payload.new] };
-          });
-        } else if (payload.eventType === 'UPDATE') {
-          setAppState(prev => ({
-            ...prev,
-            emergencyAlerts: (prev.emergencyAlerts || []).map(a =>
-              a.alert_id === payload.new.alert_id ? { ...a, ...payload.new } : a
-            )
-          }));
-        }
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-      supabase.removeChannel(emergencyChannel);
-    };
-  }, []);
-
->>>>>>> origin/main
   const handleBack = () => {
     setAppState((prev) => ({ ...prev, currentView: "portal" }));
   };
@@ -226,10 +129,15 @@ export function StaffDashboard() {
   const handleAcknowledgeAlert = async (alertId) => {
     try {
       const staffName = appState.staffInfo?.name || 'Staff';
-      await supabase
-        .from('emergency_alerts')
-        .update({ alert_status: 'acknowledged', acknowledged_by: staffName, acknowledged_at: new Date().toISOString() })
-        .eq('alert_id', alertId);
+      try {
+        await updateDoc(doc(db, 'emergency_alerts', alertId), {
+          alert_status: 'acknowledged',
+          acknowledged_by: staffName,
+          acknowledged_at: new Date().toISOString()
+        });
+      } catch (e) {
+        console.log("Firestore emergency alert update error:", e);
+      }
 
       setAppState(prev => ({
         ...prev,
@@ -245,10 +153,13 @@ export function StaffDashboard() {
 
   const handleUpdateAlertStatus = async (alertId, newStatus) => {
     try {
-      await supabase
-        .from('emergency_alerts')
-        .update({ alert_status: newStatus })
-        .eq('alert_id', alertId);
+      try {
+        await updateDoc(doc(db, 'emergency_alerts', alertId), {
+          alert_status: newStatus
+        });
+      } catch (e) {
+        console.log("Firestore emergency alert update error:", e);
+      }
 
       setAppState(prev => ({
         ...prev,
