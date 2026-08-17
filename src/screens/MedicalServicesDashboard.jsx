@@ -393,10 +393,10 @@ var styles = _reactNative.StyleSheet.create({
     cardItemMobile: { marginBottom: 8 },
     itemHeader: { flexDirection: 'row', alignItems: 'center' },
     itemHeaderMobile: { flexDirection: 'column', alignItems: 'flex-start' },
-    textBlockMobile: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', marginLeft: 0, marginTop: 10, marginBottom: 4, width: '100%' },
+    textBlockMobile: { flexShrink: 1, width: '100%', marginLeft: 0, marginTop: 10, marginBottom: 8 },
     iconBox: { padding: 12, borderRadius: 24 },
     iconBoxMobile: { padding: 8, borderRadius: 20 },
-    cardActionsMobile: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#e2e8f0' },
+    cardActionsMobile: { width: '100%', flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#e2e8f0', gap: 12 },
     bookBtnMobile: { paddingVertical: 6, paddingHorizontal: 14 },
     rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     rowCenter: { flexDirection: 'row', alignItems: 'center' }
