@@ -134,7 +134,7 @@ export function StaffLoginScreen() {
                                 onPress={() => {
                                     setState(prev => ({
                                         ...prev,
-                                        staffInfo: { name: "Guest Staff", department: "General" },
+                                        staffInfo: { name: "Guest Staff", department: "General Medicine" },
                                         currentView: 'staff-dashboard'
                                     }));
                                 }}

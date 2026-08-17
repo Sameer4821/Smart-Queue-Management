@@ -78,8 +78,13 @@ export function StaffDashboard() {
   // Sort queue strictly by priority
   const priorityMap = { emergency: 1, disabled: 2, common: 3 };
 
-  // All active tokens
-  const allActiveTokens = (appState.tokens || []).filter(t => t.status === "active" || t.status === "waiting").sort((a, b) => {
+  // All active tokens, filtered by staff department (plus global emergencies)
+  const allActiveTokens = (appState.tokens || []).filter(t =>
+    (t.status === "active" || t.status === "waiting") &&
+    (t.primaryDepartment === (appState.staffInfo?.department || "General Medicine") ||
+      t.type?.toLowerCase() === 'emergency' ||
+      t.primaryDepartment?.toLowerCase() === 'emergency')
+  ).sort((a, b) => {
     const isAEmergency = a.type?.toLowerCase() === 'emergency' || a.primaryDepartment?.toLowerCase() === 'emergency';
     const isBEmergency = b.type?.toLowerCase() === 'emergency' || b.primaryDepartment?.toLowerCase() === 'emergency';
 
