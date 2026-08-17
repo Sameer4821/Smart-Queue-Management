@@ -114,12 +114,13 @@ export function PatientRegistrationScreen() {
 
                             <Button
                                 onPress={() => {
+                                    const parsedPhone = phone.trim() ? (phone.trim().startsWith('+') ? phone.trim() : `+91${phone.trim()}`) : '';
                                     setState(prev => ({
                                         ...prev,
                                         patientInfo: {
-                                            name: 'Test Patient',
+                                            name: 'Patient', // Trigger info setup
                                             email: '',
-                                            phone: '+919999999999'
+                                            phone: parsedPhone
                                         },
                                         currentView: 'patient-dashboard'
                                     }));
@@ -129,6 +130,7 @@ export function PatientRegistrationScreen() {
                                     {t('regSkipLogin')}
                                 </Text>
                             </Button>
+
                         </CardContent>
                     </Card>
                 </ScrollView>

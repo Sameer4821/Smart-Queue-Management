@@ -4,6 +4,7 @@ var _useTranslation = require("../hooks/useTranslation");
 var _Settings = require("../components/Settings");
 var _DepartmentStatistics = require("../components/DepartmentStatistics");
 var _PatientHistory = require("../components/PatientHistory");
+var _PatientPersonalInfoSetup = require("./PatientPersonalInfoSetup");
 
 var _button = require("../components/ui/button");
 var _card = require("../components/ui/card");
@@ -11,7 +12,9 @@ var _badge = require("../components/ui/badge");
 var _input = require("../components/ui/input");
 
 var _lucideReactNative = require("lucide-react-native");
-var _asyncStorage = _interopRequireDefault(require("@react-native-async-storage/async-storage")); var _jsxRuntime = require("react/jsx-runtime"); function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }// import { Progress } from './ui/progress';
+var _asyncStorage = _interopRequireDefault(require("@react-native-async-storage/async-storage"));
+var _supabaseClient = require("../services/supabaseClient");
+var _jsxRuntime = require("react/jsx-runtime"); function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, default: e }; if (null === e || "object" != typeof e && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t in e) "default" !== _t && {}.hasOwnProperty.call(e, _t) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t)) && (i.get || i.set) ? o(f, _t, i) : f[_t] = e[_t]); return f; })(e, t); }// import { Progress } from './ui/progress';
 
 
 
@@ -24,6 +27,45 @@ function PatientDashboard() {
     var _useState3 = (0, _react.useState)(false), _useState4 = (0, _slicedToArray2.default)(_useState3, 2), showDepartmentStats = _useState4[0], setShowDepartmentStats = _useState4[1];
     var _useState5 = (0, _react.useState)(false), _useState6 = (0, _slicedToArray2.default)(_useState5, 2), showPatientHistory = _useState6[0], setShowPatientHistory = _useState6[1];
     var remainingEmergency = state.maxEmergencyPerDay - state.emergencyCount;
+
+    var _useState7 = (0, _react.useState)(null), _useState8 = (0, _slicedToArray2.default)(_useState7, 2), latestPrescription = _useState8[0], setLatestPrescription = _useState8[1];
+    var pulseAnim = (0, _react.useRef)(new _reactNative.Animated.Value(0)).current;
+
+    (0, _react.useEffect)(function () {
+        if (!state.patientInfo) return;
+        var patientId = state.patientInfo.phone || state.patientInfo.email;
+        if (!patientId) return;
+
+        var activeToken = state.tokens.find(function (t) { return t.patient.email === state.patientInfo.email && t.status === 'active'; });
+        if (!activeToken) return;
+
+        var setPrescriptionFromPayload = function (payload) {
+            if (payload.new && payload.new.token_id === activeToken.id) {
+                setLatestPrescription(payload.new);
+            }
+        };
+
+        var channel = _supabaseClient.supabase.channel('public:prescriptions')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'prescriptions', filter: 'patient_id=eq.' + patientId }, setPrescriptionFromPayload)
+            .subscribe();
+
+        return function () {
+            _supabaseClient.supabase.removeChannel(channel);
+        };
+    }, [state.patientInfo, state.tokens]);
+
+    (0, _react.useEffect)(function () {
+        if (latestPrescription) {
+            _reactNative.Animated.loop(
+                _reactNative.Animated.sequence([
+                    _reactNative.Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: false }),
+                    _reactNative.Animated.timing(pulseAnim, { toValue: 0, duration: 800, useNativeDriver: false })
+                ])
+            ).start();
+        } else {
+            pulseAnim.setValue(0);
+        }
+    });
 
     var patientTokens = state.tokens.filter(function (tok) {
         var _state$patientInfo;
@@ -39,7 +81,7 @@ function PatientDashboard() {
         }
         return false;
     });
-    const activePatientToken = patientTokens.find(function(tok) {
+    const activePatientToken = patientTokens.find(function (tok) {
         return tok.status !== 'completed' && tok.status !== 'cancelled';
     });
 
@@ -51,7 +93,7 @@ function PatientDashboard() {
     const isUpdatingSymptoms = _useStateUpdating[0];
     const setIsUpdatingSymptoms = _useStateUpdating[1];
 
-    (0, _react.useEffect)(function() {
+    (0, _react.useEffect)(function () {
         if (activePatientToken) {
             setSymptomsInput(activePatientToken.patient?.symptoms || '');
         }
@@ -72,19 +114,19 @@ function PatientDashboard() {
                         })
                     })
                 });
-                
+
                 const _supabaseClient = require("../services/supabaseClient");
                 const { error } = yield _supabaseClient.supabase
                     .from('queue')
                     .update({ token_data: updatedToken })
                     .eq('token_id', activePatientToken.id);
-                    
+
                 if (error) {
                     console.error("Failed to update symptoms in Supabase:", error);
                 } else {
-                    setState(function(prev) {
+                    setState(function (prev) {
                         return Object.assign({}, prev, {
-                            tokens: prev.tokens.map(function(t) { return t.id === activePatientToken.id ? updatedToken : t; }),
+                            tokens: prev.tokens.map(function (t) { return t.id === activePatientToken.id ? updatedToken : t; }),
                             currentToken: prev.currentToken && prev.currentToken.id === activePatientToken.id ? updatedToken : prev.currentToken
                         });
                     });
@@ -133,6 +175,11 @@ function PatientDashboard() {
     if (showSettings) return/*#__PURE__*/(0, _jsxRuntime.jsx)(_Settings.Settings, { onClose: function onClose() { return setShowSettings(false); } });
     if (showDepartmentStats) return/*#__PURE__*/(0, _jsxRuntime.jsx)(_DepartmentStatistics.DepartmentStatistics, { onBack: function onBack() { return setShowDepartmentStats(false); } });
     if (showPatientHistory) return/*#__PURE__*/(0, _jsxRuntime.jsx)(_PatientHistory.PatientHistory, { onBack: function onBack() { return setShowPatientHistory(false); } });
+
+    // Show setup screen if patient name is missing or defaulting to 'Patient'
+    if (state.patientInfo.name === 'Patient' || !state.patientInfo.name) {
+        return /*#__PURE__*/(0, _jsxRuntime.jsx)(_PatientPersonalInfoSetup.PatientPersonalInfoSetup, {});
+    }
 
     // patientTokens and activePatientToken logic moved to top of component
     var totalVisits = patientTokens.flatMap(function (token) { return token.visits || []; }).length;
@@ -200,21 +247,21 @@ function PatientDashboard() {
                                         (0, _jsxRuntime.jsx)(_badge.Badge, { variant: "secondary", children:/*#__PURE__*/(0, _jsxRuntime.jsx)(_reactNative.Text, { children: t.pdLoggedInAs }) })]
                                 }
                                 ),/*#__PURE__*/
-                                 activePatientToken ? (0, _jsxRuntime.jsxs)(_card.Card, {
-                                    style: { 
-                                        backgroundColor: '#f0f9ff', 
-                                        borderColor: '#bae6fd', 
-                                        borderWidth: 2, 
-                                        borderRadius: 12, 
-                                        padding: 16, 
-                                        marginTop: 16, 
-                                        width: '100%' 
+                                activePatientToken ? (0, _jsxRuntime.jsxs)(_card.Card, {
+                                    style: {
+                                        backgroundColor: '#f0f9ff',
+                                        borderColor: '#bae6fd',
+                                        borderWidth: 2,
+                                        borderRadius: 12,
+                                        padding: 16,
+                                        marginTop: 16,
+                                        width: '100%'
                                     },
                                     children: [
                                         (0, _jsxRuntime.jsxs)(_reactNative.Text, { style: { fontSize: 18, fontWeight: 'bold', color: '#0369a1' }, children: ["Active Token / క్రియాశీల టోకెన్: ", activePatientToken.id] }),
                                         (0, _jsxRuntime.jsxs)(_reactNative.Text, { style: { fontSize: 14, color: '#0284c7', marginTop: 4 }, children: ["Department: ", activePatientToken.primaryDepartment] }),
                                         (0, _jsxRuntime.jsxs)(_reactNative.Text, { style: { fontSize: 14, color: '#0369a1', marginTop: 8, fontWeight: 'bold' }, children: ["Symptoms: ", activePatientToken.patient?.symptoms || "None"] }),
-                                        (0, _jsxRuntime.jsxs)(_reactNative.View, { 
+                                        (0, _jsxRuntime.jsxs)(_reactNative.View, {
                                             style: { flexDirection: 'row', gap: 8, marginTop: 8, alignItems: 'center' },
                                             children: [
                                                 (0, _jsxRuntime.jsx)(_input.Input, {
@@ -233,8 +280,8 @@ function PatientDashboard() {
                                         }),
                                         (0, _jsxRuntime.jsx)(_button.Button, {
                                             style: { marginTop: 12, backgroundColor: '#0284c7' },
-                                            onPress: function() {
-                                                setState(function(prev) {
+                                            onPress: function () {
+                                                setState(function (prev) {
                                                     return Object.assign({}, prev, {
                                                         currentToken: activePatientToken,
                                                         currentView: 'token'
@@ -244,8 +291,22 @@ function PatientDashboard() {
                                             children: (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: '#fff', fontWeight: 'bold' }, children: "View Live Status / లైవ్ స్థితిని చూడండి" })
                                         })
                                     ]
-                                 }) : (0, _jsxRuntime.jsx)(_reactNative.View, { style: { alignItems: 'center', marginTop: 16 } })
-                                 ]
+                                }) : null,
+
+                                (0, _jsxRuntime.jsx)(_reactNative.Animated.View, {
+                                    style: {
+                                        marginTop: 12,
+                                        opacity: latestPrescription ? _reactNative.Animated.add(0.5, _reactNative.Animated.multiply(pulseAnim, 0.5)) : 0.5
+                                    }, children:/*#__PURE__*/
+                                        (0, _jsxRuntime.jsxs)(_reactNative.TouchableOpacity, {
+                                            disabled: !latestPrescription,
+                                            style: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: latestPrescription ? '#2563eb' : '#e2e8f0', paddingVertical: 10, borderRadius: 8 }, children: [/*#__PURE__*/
+                                                (0, _jsxRuntime.jsx)(_lucideReactNative.FileText, { size: 18, color: latestPrescription ? "#ffffff" : "#94a3b8", style: { marginRight: 8 } }),/*#__PURE__*/
+                                                (0, _jsxRuntime.jsx)(_reactNative.Text, { style: { color: latestPrescription ? "#ffffff" : "#94a3b8", fontWeight: '600' }, children: latestPrescription ? "View Prescription" : "No prescriptions yet" })]
+                                        })
+                                }),
+                                (0, _jsxRuntime.jsx)(_reactNative.View, { style: { alignItems: 'center', marginTop: 16 } })
+                            ]
                         }
                         )
                 }
@@ -255,8 +316,8 @@ function PatientDashboard() {
                 (0, _jsxRuntime.jsxs)(_card.Card, {
                     style: styles.card, children: [/*#__PURE__*/
                         (0, _jsxRuntime.jsx)(_card.CardHeader, {
-                            style: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }, children:/*#__PURE__*/
-                                (0, _jsxRuntime.jsx)(_card.CardTitle, { children: t.pdSelectCategory })
+                            style: [{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }, isMobile && { paddingHorizontal: 4, paddingBottom: 16 }], children:/*#__PURE__*/
+                                (0, _jsxRuntime.jsx)(_card.CardTitle, { style: isMobile && { fontSize: 20, color: '#0f172a' }, children: t.pdSelectCategory })
                         }
                         ),/*#__PURE__*/
                         (0, _jsxRuntime.jsxs)(_card.CardContent, {

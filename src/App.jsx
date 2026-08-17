@@ -25,6 +25,7 @@ var _AuthContext = require("./contexts/AuthContext");
 var _AuthRouter = require("./components/auth/AuthRouter");
 var _PatientPortal = require("./components/PatientPortal");
 var _PatientRegistrationScreen = require("./screens/PatientRegistrationScreen");
+var _PatientPersonalInfoSetup = require("./screens/PatientPersonalInfoSetup");
 var _OTPVerificationScreen = require("./screens/OTPVerificationScreen");
 var _StaffLoginScreen = require("./screens/StaffLoginScreen");
 var _MedicalServicesDashboard = require("./screens/MedicalServicesDashboard");
@@ -396,31 +397,30 @@ function AppContent() {
         var _ref2 = (0, _asyncToGenerator2.default)(function* () {
           if (user && !authLoading) {
             var _user$user_metadata, _user$email, _user$user_metadata2;
-            var patientInfo = {
-              name:
-                ((_user$user_metadata = user.user_metadata) == null
-                  ? void 0
-                  : _user$user_metadata.name) ||
-                ((_user$email = user.email) == null
-                  ? void 0
-                  : _user$email.split("@")[0]) ||
-                "Patient",
-              email: user.email || "",
-              phone:
-                ((_user$user_metadata2 = user.user_metadata) == null
-                  ? void 0
-                  : _user$user_metadata2.phone) || "",
-            };
+            var _yield$supabase$from = yield _supabaseClient.supabase.from('patients').select('*').eq('id', user.id).single(), existingPatient = _yield$supabase$from.data, selectError = _yield$supabase$from.error;
+            if (existingPatient && existingPatient.full_name) {
+              var patientInfo = {
+                name: existingPatient.full_name,
+                email: existingPatient.email || user.email || "",
+                phone: existingPatient.phone_number || "",
+              };
 
-            yield _asyncStorage.default.setItem(
-              "current-patient-info",
-              JSON.stringify(patientInfo),
-            );
-            setState(function (prev) {
-              return Object.assign({}, prev, {
-                patientInfo: patientInfo,
+              yield _asyncStorage.default.setItem(
+                "current-patient-info",
+                JSON.stringify(patientInfo),
+              );
+              setState(function (prev) {
+                return Object.assign({}, prev, {
+                  patientInfo: patientInfo,
+                });
               });
-            });
+            } else {
+              setState(function (prev) {
+                return Object.assign({}, prev, {
+                  currentView: "patient-personal-info-setup",
+                });
+              });
+            }
           } else if (!user && !authLoading) {
             yield _asyncStorage.default.removeItem("current-patient-info");
             setState(function (prev) {
@@ -753,6 +753,11 @@ function AppContent() {
       case "portal":
         return /*#__PURE__*/ (0, _jsxRuntime.jsx)(
           _PatientPortal.PatientPortal,
+          {},
+        );
+      case "patient-personal-info-setup":
+        return /*#__PURE__*/ (0, _jsxRuntime.jsx)(
+          _PatientPersonalInfoSetup.PatientPersonalInfoSetup,
           {},
         );
       case "patient-details":

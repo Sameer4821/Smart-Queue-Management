@@ -4,6 +4,12 @@
 CREATE TABLE IF NOT EXISTS patients (
     id UUID PRIMARY KEY,
     phone_number TEXT UNIQUE NOT NULL,
+    full_name TEXT,
+    dob TEXT,
+    gender TEXT,
+    email TEXT,
+    address TEXT,
+    emergency_contact TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
@@ -11,6 +17,7 @@ CREATE TABLE IF NOT EXISTS patients (
 ALTER TABLE patients ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Patients can view own record" ON patients FOR SELECT USING (auth.uid() = id);
 CREATE POLICY "Users can insert own record" ON patients FOR INSERT WITH CHECK (auth.uid() = id);
+CREATE POLICY "Users can update own record" ON patients FOR UPDATE USING (auth.uid() = id);
 
 -- Create staff_accounts table
 CREATE TABLE IF NOT EXISTS staff_accounts (
