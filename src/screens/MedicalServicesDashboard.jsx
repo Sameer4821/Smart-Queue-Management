@@ -73,6 +73,7 @@ function PatientDashboard() {
 
     var handleLogout =/*#__PURE__*/function () {
         var _ref = (0, _asyncToGenerator2.default)(function* () {
+            yield _supabaseClient.supabase.auth.signOut();
             yield _asyncStorage.default.removeItem('current-patient-info');
             setState(function (prev) {
                 return Object.assign({},

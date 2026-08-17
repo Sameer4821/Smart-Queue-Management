@@ -222,11 +222,26 @@ function AppContent() {
           "emergency-count-" + new Date().toDateString(),
         );
         var savedLanguage = yield _asyncStorage.default.getItem("hospital-language");
+        var savedPatientSession = yield _asyncStorage.default.getItem("current-patient-info");
 
         if (savedLanguage) {
           setState(function (prev) {
             return Object.assign({}, prev, { language: savedLanguage });
           });
+        }
+
+        if (savedPatientSession) {
+          try {
+            var parsedPatientInfo = JSON.parse(savedPatientSession);
+            if (parsedPatientInfo && parsedPatientInfo.name) {
+              setState(function (prev) {
+                if (prev.currentView === 'staff-login' || prev.currentView === 'staff-dashboard') return prev;
+                return Object.assign({}, prev, { patientInfo: parsedPatientInfo, currentView: "patient-dashboard" });
+              });
+            }
+          } catch (e) {
+            console.error("Error parsing patient session on mount", e);
+          }
         }
 
         if (savedTokens) {
@@ -410,25 +425,28 @@ function AppContent() {
                 JSON.stringify(patientInfo),
               );
               setState(function (prev) {
+                if (prev.currentView === 'staff-login' || prev.currentView === 'staff-dashboard') {
+                  return Object.assign({}, prev, { patientInfo: patientInfo });
+                }
                 return Object.assign({}, prev, {
                   patientInfo: patientInfo,
+                  currentView: "patient-dashboard"
                 });
               });
             } else {
               setState(function (prev) {
+                if (prev.patientInfo && prev.patientInfo.name && prev.patientInfo.name !== 'Patient') {
+                  if (prev.currentView === 'staff-login' || prev.currentView === 'staff-dashboard') return prev;
+                  return Object.assign({}, prev, { currentView: "patient-dashboard" });
+                }
                 return Object.assign({}, prev, {
                   currentView: "patient-personal-info-setup",
                 });
               });
             }
           } else if (!user && !authLoading) {
-            yield _asyncStorage.default.removeItem("current-patient-info");
-            setState(function (prev) {
-              return Object.assign({}, prev, {
-                patientInfo: null,
-                currentView: "portal",
-              });
-            });
+            // DO NOT automatically wipe patient session here.
+            // Relies completely on handleLogout inside MedicalServicesDashboard.jsx to destroy sessions natively.
           }
         });
         return function syncInfo() {
