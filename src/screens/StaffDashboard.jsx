@@ -129,6 +129,43 @@ export function StaffDashboard() {
 
   // Supabase Real-Time Sync for Token Queue
   useEffect(() => {
+    const fetchInitialQueue = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('queue')
+          .select('*')
+          .in('status', ['waiting', 'active']);
+
+        if (error) {
+          console.error("Error fetching initial queue:", error);
+          return;
+        }
+
+        const initialTokens = data.map(row => ({
+          id: row.token_id,
+          type: row.token_id && row.token_id.startsWith('EME') ? 'emergency' : row.token_id && row.token_id.startsWith('ACE') ? 'disabled' : 'common',
+          primaryDepartment: row.department,
+          timestamp: row.created_at ? new Date(row.created_at) : new Date(),
+          patient: {
+            name: row.patient_name || 'Walk-in Patient',
+          },
+          status: row.status || 'active',
+          qrCode: row.token_id
+        }));
+
+        setAppState(prev => {
+          const existingIds = new Set(prev.tokens.map(t => t.id));
+          const newTokens = initialTokens.filter(t => !existingIds.has(t.id));
+          if (newTokens.length === 0) return prev;
+          return { ...prev, tokens: [...prev.tokens, ...newTokens] };
+        });
+      } catch (err) {
+        console.error("Failed to fetch initial queue:", err);
+      }
+    };
+
+    fetchInitialQueue();
+
     const channel = supabase.channel('public:queue_sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, (payload) => {
         if (payload.eventType === 'INSERT') {
